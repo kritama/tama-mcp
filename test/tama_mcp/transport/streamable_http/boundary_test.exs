@@ -137,7 +137,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
     ]
 
     for body <- invalid do
-      assert {:error, %TamaMCP.Error{}, _status, _id, _conn} = Request.validate(valid_conn, body)
+      assert {:error, %TamaMCP.Error{}, _status, _id, _conn} =
+               Request.validate(valid_conn, body, TamaMCP.TestSupport.Server)
     end
   end
 
@@ -157,10 +158,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
       )
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
-             Request.validate(valid_conn, encode(missing_version))
+             Request.validate(valid_conn, encode(missing_version), TamaMCP.TestSupport.Server)
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
-             Request.validate(valid_conn, encode(invalid_info))
+             Request.validate(valid_conn, encode(invalid_info), TamaMCP.TestSupport.Server)
   end
 
   defp conn(headers), do: %{Plug.Test.conn(:post, "/", "") | req_headers: headers}

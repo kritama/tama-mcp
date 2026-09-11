@@ -2,12 +2,13 @@ defmodule TamaMCP.Tool.Builder do
   @moduledoc false
 
   alias TamaMCP.Schema
-  alias TamaMCP.Tool.Metadata
+  alias TamaMCP.Tool.{Headers, Metadata}
 
   def before_compile(env) do
     attributes = attributes(env.module)
     input = compile_schema!(attributes.input, :input, env)
     output = compile_schema!(attributes.output, :output, env)
+    headers = compile_headers!(input, env)
 
     metadata = %Metadata{
       task: attributes.task,
@@ -15,6 +16,7 @@ defmodule TamaMCP.Tool.Builder do
       description: attributes.description,
       title: attributes.title,
       annotations: attributes.annotations,
+      headers: headers,
       input_schema: input,
       output_schema: output
     }
@@ -23,7 +25,7 @@ defmodule TamaMCP.Tool.Builder do
     ensure_callback!(env)
 
     quote do
-      unquote(schema_functions(metadata, input, output, attributes.task, definition))
+      unquote(schema_functions(metadata, input, output, headers, attributes.task, definition))
       unquote(policy_functions(attributes.scopes, attributes.annotations))
     end
   end
@@ -78,6 +80,13 @@ defmodule TamaMCP.Tool.Builder do
     end
   end
 
+  defp compile_headers!(schema, env) do
+    case Headers.extract(schema) do
+      {:ok, headers} -> headers
+      {:error, reason} -> compile_error!(env, "invalid input schema: #{reason}")
+    end
+  end
+
   defp ensure_callback!(env) do
     unless Module.defines?(env.module, {:call, 2}) do
       compile_error!(
@@ -98,7 +107,7 @@ defmodule TamaMCP.Tool.Builder do
   defp put(map, _key, nil), do: map
   defp put(map, key, value), do: Map.put(map, key, value)
 
-  defp schema_functions(metadata, input, output, task, definition) do
+  defp schema_functions(metadata, input, output, headers, task, definition) do
     quote do
       @doc false
       def tool_metadata, do: unquote(Macro.escape(metadata))
@@ -106,6 +115,8 @@ defmodule TamaMCP.Tool.Builder do
       def input_schema, do: unquote(Macro.escape(input))
       @doc false
       def output_schema, do: unquote(Macro.escape(output))
+      @doc false
+      def parameter_headers, do: unquote(Macro.escape(headers))
       @doc false
       def task_policy, do: unquote(task)
       @doc false

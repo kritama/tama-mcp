@@ -17,8 +17,10 @@ defmodule TamaMCP.TestSupport.Authorization do
              "test.context",
              "test.echo",
              "test.failing",
+             "test.headers",
              "test.invalid",
              "test.invalid_output",
+             "test.null",
              "test.protocol_failing",
              "test.slow"
            ],

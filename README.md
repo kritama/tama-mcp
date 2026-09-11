@@ -109,8 +109,9 @@ validation on every HTTP request.
 `TamaMCP.Conformance` validates complete Phase 1 requests and responses against
 the immutable upstream schema in `priv/protocol/2026-07-28`. Its bundled wire
 fixtures exercise discovery, authorization-aware listing, synchronous success,
-tool errors, malformed metadata, scope denial, header disagreement, unsupported
-versions, output-schema failure, and rejection of protocol sessions.
+tool errors, malformed metadata, scope denial, standard and schema-declared
+header agreement, unsupported versions, explicit null output, output-schema
+failure, and rejection of protocol sessions.
 
 Host applications can call `TamaMCP.Conformance.validate/2` for individual
 values or `TamaMCP.Conformance.run/2` with a request callback and an application

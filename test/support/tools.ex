@@ -43,6 +43,37 @@ defmodule TamaMCP.TestSupport.Tools.Failing do
   end
 end
 
+defmodule TamaMCP.TestSupport.Tools.Headers do
+  @moduledoc false
+
+  use TamaMCP.Tool,
+    task: :disabled,
+    scopes: ["test.headers"],
+    description: "Validates parameters mirrored into HTTP headers."
+
+  raw_input_schema(%{
+    "type" => "object",
+    "properties" => %{
+      "enabled" => %{"type" => "boolean", "x-mcp-header" => "Enabled"},
+      "note" => %{"type" => "string", "x-mcp-header" => "Note"},
+      "region" => %{"type" => "string", "x-mcp-header" => "Region"},
+      "routing" => %{
+        "type" => "object",
+        "properties" => %{
+          "shard" => %{"type" => "integer", "x-mcp-header" => "Shard"}
+        },
+        "required" => ["shard"],
+        "additionalProperties" => false
+      }
+    },
+    "required" => ["enabled", "region", "routing"],
+    "additionalProperties" => false
+  })
+
+  @impl true
+  def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+end
+
 defmodule TamaMCP.TestSupport.Tools.ProtocolFailing do
   @moduledoc false
 
@@ -111,6 +142,19 @@ defmodule TamaMCP.TestSupport.Tools.InvalidOutput do
   @impl true
   def call(_input, _context) do
     {:ok, TamaMCP.Response.success(structured_content: %{"status" => 123})}
+  end
+end
+
+defmodule TamaMCP.TestSupport.Tools.Null do
+  @moduledoc false
+
+  use TamaMCP.Tool, task: :disabled, scopes: ["test.null"]
+
+  raw_output_schema(%{"type" => "null"})
+
+  @impl true
+  def call(_input, _context) do
+    {:ok, TamaMCP.Response.success(structured_content: nil)}
   end
 end
 

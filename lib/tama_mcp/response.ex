@@ -9,11 +9,16 @@ defmodule TamaMCP.Response do
   `TamaMCP.Error`.
   """
 
-  defstruct content: [], structured_content: nil, is_error: false, meta: nil
+  defstruct content: [],
+            structured_content: nil,
+            structured_content?: false,
+            is_error: false,
+            meta: nil
 
   @type t :: %__MODULE__{
           content: [map()],
           structured_content: term(),
+          structured_content?: boolean(),
           is_error: boolean(),
           meta: map() | nil
         }
@@ -24,7 +29,8 @@ defmodule TamaMCP.Response do
   Options:
 
     * `:content` - list of content block maps (default `[]`).
-    * `:structured_content` - JSON-safe structured result (default `nil`).
+    * `:structured_content` - JSON-safe structured result. When explicitly set
+      to `nil`, it is encoded as JSON `null`; when omitted, the field is absent.
     * `:meta` - validated result metadata map (default `nil`).
   """
   @spec success(keyword()) :: t()
@@ -32,6 +38,7 @@ defmodule TamaMCP.Response do
     %__MODULE__{
       content: Keyword.get(opts, :content, []),
       structured_content: Keyword.get(opts, :structured_content),
+      structured_content?: Keyword.has_key?(opts, :structured_content),
       is_error: false,
       meta: Keyword.get(opts, :meta)
     }
@@ -69,7 +76,7 @@ defmodule TamaMCP.Response do
     }
 
     result =
-      if response.structured_content != nil do
+      if structured_content?(response) do
         Map.put(result, "structuredContent", response.structured_content)
       else
         result
@@ -90,11 +97,21 @@ defmodule TamaMCP.Response do
   """
   @spec validate(t()) :: :ok | {:error, atom()}
   def validate(%__MODULE__{} = response) do
-    with :ok <- validate_content(response.content),
+    with :ok <- validate_presence(response.structured_content?),
+         :ok <- validate_content(response.content),
          :ok <- validate_json_safe(:structured_content, response.structured_content) do
       validate_json_safe(:meta, response.meta)
     end
   end
+
+  @doc false
+  @spec structured_content?(t()) :: boolean()
+  def structured_content?(%__MODULE__{} = response) do
+    response.structured_content? == true or not is_nil(response.structured_content)
+  end
+
+  defp validate_presence(value) when is_boolean(value), do: :ok
+  defp validate_presence(_value), do: {:error, :invalid_structured_content_presence}
 
   defp validate_content(content) when is_list(content) do
     Enum.reduce_while(content, :ok, fn block, _acc ->

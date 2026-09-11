@@ -566,6 +566,157 @@
           }
         }
       }
+    },
+    {
+      "name": "tools/call mirrored parameter headers",
+      "requestSchema": "call_tool_request",
+      "requestValid": true,
+      "responseSchema": "call_tool_response",
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tools/call"],
+          ["mcp-name", "headers"],
+          ["mcp-param-enabled", "true"],
+          ["mcp-param-region", "=?base64?SGVsbG8sIOS4lueVjA==?="],
+          ["mcp-param-shard", "42"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-headers",
+          "method": "tools/call",
+          "params": {
+            "name": "headers",
+            "arguments": {
+              "enabled": true,
+              "region": "Hello, 世界",
+              "routing": {"shard": 42}
+            },
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {}
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-headers",
+          "result": {
+            "resultType": "complete",
+            "content": [],
+            "isError": false,
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-test",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tools/call missing mirrored parameter header",
+      "requestSchema": "call_tool_request",
+      "requestValid": true,
+      "responseSchema": "error_response",
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tools/call"],
+          ["mcp-name", "headers"],
+          ["mcp-param-region", "west"],
+          ["mcp-param-shard", "42"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-missing-header",
+          "method": "tools/call",
+          "params": {
+            "name": "headers",
+            "arguments": {
+              "enabled": true,
+              "region": "west",
+              "routing": {"shard": 42}
+            },
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {}
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": 400,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-missing-header",
+          "error": {
+            "code": -32020,
+            "message": "Header mismatch: Mcp-Param-Enabled header is required when the argument is present"
+          }
+        }
+      }
+    },
+    {
+      "name": "tools/call explicit null structured content",
+      "requestSchema": "call_tool_request",
+      "requestValid": true,
+      "responseSchema": "call_tool_response",
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tools/call"],
+          ["mcp-name", "null"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-null",
+          "method": "tools/call",
+          "params": {
+            "name": "null",
+            "arguments": {},
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {}
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "call-null",
+          "result": {
+            "resultType": "complete",
+            "content": [],
+            "structuredContent": null,
+            "isError": false,
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-test",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

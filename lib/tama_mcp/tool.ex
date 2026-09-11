@@ -15,12 +15,20 @@ defmodule TamaMCP.Tool do
   defmodule Metadata do
     @moduledoc "Compiled metadata and wire schemas for a tool."
 
+    @type header :: %{
+            header: String.t(),
+            name: String.t(),
+            path: [String.t()],
+            type: String.t()
+          }
+
     defstruct [
       :task,
       :scopes,
       :description,
       :title,
       :annotations,
+      :headers,
       :input_schema,
       :output_schema
     ]
@@ -31,6 +39,7 @@ defmodule TamaMCP.Tool do
             description: String.t() | nil,
             title: String.t() | nil,
             annotations: map() | nil,
+            headers: [header()],
             input_schema: map(),
             output_schema: map() | nil
           }

@@ -134,10 +134,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   end
 
   defp complete(conn, request, module, response, runtime, base) do
-    result = Response.encode(response) |> Wire.merge_meta(Wire.server_meta(runtime))
-
     with :ok <- Response.validate(response),
          :ok <- structured(module, response),
+         result = Response.encode(response) |> Wire.merge_meta(Wire.server_meta(runtime)),
          :ok <- protocol_result(result) do
       reply = Wire.result(conn, 200, request.request_id, result, Map.put(base, :status, :ok))
 
@@ -151,9 +150,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
   defp structured(module, response) do
     case module.output_validator() do
-      nil -> :ok
-      _compiled when is_nil(response.structured_content) -> {:error, :missing_structured_content}
-      compiled -> Schema.validate(compiled, response.structured_content)
+      nil ->
+        :ok
+
+      compiled ->
+        if Response.structured_content?(response) do
+          Schema.validate(compiled, response.structured_content)
+        else
+          {:error, :missing_structured_content}
+        end
     end
   end
 

@@ -109,8 +109,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
   defp non_empty(value) when is_binary(value) and value != "", do: value
   defp non_empty(_value), do: nil
 
-  defp decode(value) do
-    if value =~ @base64_sentinel, do: decode_sentinel(value), else: valid_utf8(value)
+  @doc false
+  def decode(value) do
+    if value =~ @base64_sentinel, do: decode_sentinel(value), else: valid_plain(value)
   end
 
   defp decode_sentinel(value) do
@@ -122,8 +123,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
     end
   end
 
+  defp valid_plain(value) do
+    cond do
+      not String.valid?(value) -> {:error, "invalid UTF-8"}
+      value != String.trim(value) -> {:error, "leading or trailing whitespace requires Base64"}
+      not plain_ascii?(value) -> {:error, "unsafe characters require Base64"}
+      true -> {:ok, value}
+    end
+  end
+
   defp valid_utf8(value) do
     if String.valid?(value), do: {:ok, value}, else: {:error, "invalid UTF-8"}
+  end
+
+  defp plain_ascii?(value) do
+    value
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn byte -> byte == 9 or byte in 32..126 end)
   end
 
   defp mismatch(message) do

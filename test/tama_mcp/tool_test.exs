@@ -14,6 +14,7 @@ end
 defmodule TamaMCP.ToolTest do
   @moduledoc false
 
+  alias TamaMCP.TestSupport.Tools.Headers
   alias TamaMCP.ToolTest.SideEffects
 
   use ExUnit.Case
@@ -95,6 +96,27 @@ defmodule TamaMCP.ToolTest do
       {mod, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.RawTool, 0)
       assert mod.input_schema()["properties"]["x"]["type"] == "integer"
       assert mod.output_schema()["type"] == "object"
+    end
+
+    test "raw input schemas compile statically reachable parameter headers" do
+      headers = Headers.parameter_headers()
+
+      assert headers == [
+               %{
+                 header: "mcp-param-enabled",
+                 name: "Enabled",
+                 path: ["enabled"],
+                 type: "boolean"
+               },
+               %{header: "mcp-param-note", name: "Note", path: ["note"], type: "string"},
+               %{header: "mcp-param-region", name: "Region", path: ["region"], type: "string"},
+               %{
+                 header: "mcp-param-shard",
+                 name: "Shard",
+                 path: ["routing", "shard"],
+                 type: "integer"
+               }
+             ]
     end
   end
 
@@ -253,6 +275,42 @@ defmodule TamaMCP.ToolTest do
       {module, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.NumericEnum, 0)
       assert module.input_schema()["properties"]["value"]["type"] == "number"
     end
+
+    test "rejects invalid parameter-header annotations at compile time" do
+      invalid = [
+        {%{"type" => "object", "x-mcp-header" => "Root"}, ~r/not statically reachable/},
+        {header_schema(""), ~r/non-empty string/},
+        {header_schema("bad name"), ~r/field-name token/},
+        {header_schema("Count", "number"), ~r/string, integer, or boolean/},
+        {
+          %{
+            "type" => "object",
+            "properties" => %{
+              "one" => %{"type" => "string", "x-mcp-header" => "Tenant"},
+              "two" => %{"type" => "string", "x-mcp-header" => "tenant"}
+            }
+          },
+          ~r/duplicate x-mcp-header/
+        },
+        {
+          %{
+            "type" => "object",
+            "properties" => %{
+              "value" => %{
+                "oneOf" => [
+                  %{"type" => "string", "x-mcp-header" => "Hidden"}
+                ]
+              }
+            }
+          },
+          ~r/not statically reachable/
+        }
+      ]
+
+      for {schema, message} <- invalid do
+        assert_raise CompileError, message, fn -> compile_raw_tool(schema) end
+      end
+    end
   end
 
   test "validator cache refreshes when a tool module is recompiled" do
@@ -300,5 +358,24 @@ defmodule TamaMCP.ToolTest do
       def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
     end
     """)
+  end
+
+  defp compile_raw_tool(schema) do
+    suffix = System.unique_integer([:positive])
+
+    Code.compile_string("""
+    defmodule TamaMCP.ToolTest.RawHeader#{suffix} do
+      use TamaMCP.Tool
+      raw_input_schema(#{inspect(schema)})
+      def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+    end
+    """)
+  end
+
+  defp header_schema(name, type \\ "string") do
+    %{
+      "type" => "object",
+      "properties" => %{"value" => %{"type" => type, "x-mcp-header" => name}}
+    }
   end
 end

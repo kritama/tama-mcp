@@ -107,7 +107,8 @@ defmodule TamaMCP.Server do
     definition: 0,
     input_validator: 0,
     output_validator: 0,
-    call: 2
+    call: 2,
+    parameter_headers: 0
   ]
 
   # `Code.ensure_compiled!/1` tells the parallel compiler the macro cannot

@@ -15,8 +15,10 @@ defmodule TamaMCP.ServerTest do
                "context",
                "echo",
                "failing",
+               "headers",
                "invalid",
                "invalid_output",
+               "null",
                "protocol_failing",
                "slow"
              ]
@@ -25,8 +27,10 @@ defmodule TamaMCP.ServerTest do
                %{name: "context", module: Tools.Context},
                %{name: "echo", module: Tools.Echo},
                %{name: "failing", module: Tools.Failing},
+               %{name: "headers", module: Tools.Headers},
                %{name: "invalid", module: Tools.Invalid},
                %{name: "invalid_output", module: Tools.InvalidOutput},
+               %{name: "null", module: Tools.Null},
                %{name: "protocol_failing", module: Tools.ProtocolFailing},
                %{name: "slow", module: Tools.Slow}
              ]

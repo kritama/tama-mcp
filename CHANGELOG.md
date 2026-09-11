@@ -17,9 +17,12 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Per-request authorization, scope-aware tool visibility, normalized request
   contexts, bounded errors, and telemetry.
 - Vendored Phase 1 wire fixtures and reusable `TamaMCP.Conformance` validators.
+- Explicit JSON `null` support for structured tool results.
 
 ### Security
 
 - Explicitly reject `Mcp-Session-Id` and legacy initialization methods.
 - Validate successful responses against the pinned MCP schema and prevent
   adapter data from entering unbounded transport errors or telemetry.
+- Validate complete method-specific requests and schema-declared
+  `Mcp-Param-*` header agreement before tool execution.

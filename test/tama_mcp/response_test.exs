@@ -33,6 +33,16 @@ defmodule TamaMCP.ResponseTest do
     assert Response.encode(response)["structuredContent"] == %{"status" => "done"}
   end
 
+  test "encoding distinguishes omitted structured content from explicit JSON null" do
+    refute Map.has_key?(Response.success() |> Response.encode(), "structuredContent")
+
+    response = Response.success(structured_content: nil)
+
+    assert response.structured_content?
+    assert Map.fetch!(Response.encode(response), "structuredContent") == nil
+    assert Response.validate(response) == :ok
+  end
+
   test "validation rejects malformed and non-JSON-safe values" do
     assert {:error, :invalid_content_block} =
              Response.validate(%Response{content: :not_a_list})
@@ -46,5 +56,8 @@ defmodule TamaMCP.ResponseTest do
              Response.validate(%Response{structured_content: %{pid: self()}})
 
     assert {:error, :non_json_safe} = Response.validate(%Response{meta: %{pid: self()}})
+
+    assert {:error, :invalid_structured_content_presence} =
+             Response.validate(%Response{structured_content?: :invalid})
   end
 end

@@ -62,8 +62,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
                "context",
                "echo",
                "failing",
+               "headers",
                "invalid",
                "invalid_output",
+               "null",
                "protocol_failing",
                "slow"
              ]
@@ -107,6 +109,136 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert result["isError"] == false
       assert result["structuredContent"] == %{"message" => "hi"}
       assert [%{"type" => "text", "text" => "echo: hi"}] = result["content"]
+    end
+
+    test "validates schema-declared parameter headers before executing", %{runtime: runtime} do
+      region = "Hello, 世界"
+
+      conn =
+        post(
+          runtime,
+          Protocol.method(:tools_call),
+          %{
+            "name" => "headers",
+            "arguments" => %{
+              "enabled" => true,
+              "region" => region,
+              "routing" => %{"shard" => 42}
+            }
+          },
+          headers: [
+            {"mcp-name", "headers"},
+            {"mcp-param-enabled", "true"},
+            {"mcp-param-region", "=?base64?#{Base.encode64(region)}?="},
+            {"mcp-param-shard", "42"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert %{"result" => %{"resultType" => "complete"}} = decode(conn)
+    end
+
+    test "rejects missing, mismatched, duplicate, and unexpected parameter headers", %{
+      runtime: runtime
+    } do
+      arguments = %{"enabled" => true, "region" => "west", "routing" => %{"shard" => 42}}
+
+      header_sets = [
+        [{"mcp-name", "headers"}, {"mcp-param-enabled", "true"}, {"mcp-param-shard", "42"}],
+        [
+          {"mcp-name", "headers"},
+          {"mcp-param-enabled", "false"},
+          {"mcp-param-region", "west"},
+          {"mcp-param-shard", "42"}
+        ],
+        [
+          {"mcp-name", "headers"},
+          {"mcp-param-enabled", "true"},
+          {"mcp-param-region", "west"},
+          {"mcp-param-region", "west"},
+          {"mcp-param-shard", "42"}
+        ],
+        [
+          {"mcp-name", "headers"},
+          {"mcp-param-enabled", "true"},
+          {"mcp-param-note", "unexpected"},
+          {"mcp-param-region", "west"},
+          {"mcp-param-shard", "42"}
+        ]
+      ]
+
+      for headers <- header_sets do
+        conn =
+          post(
+            runtime,
+            Protocol.method(:tools_call),
+            %{"name" => "headers", "arguments" => arguments},
+            headers: headers
+          )
+
+        assert conn.status == 400
+        assert %{"error" => %{"code" => @header_mismatch}} = decode(conn)
+      end
+    end
+
+    test "rejects unsafe plain values, null headers, and integers outside the safe range", %{
+      runtime: runtime
+    } do
+      cases = [
+        {
+          %{"enabled" => true, "region" => "世界", "routing" => %{"shard" => 42}},
+          [{"mcp-param-enabled", "true"}, {"mcp-param-region", "世界"}, {"mcp-param-shard", "42"}]
+        },
+        {
+          %{
+            "enabled" => true,
+            "note" => nil,
+            "region" => "west",
+            "routing" => %{"shard" => 42}
+          },
+          [
+            {"mcp-param-enabled", "true"},
+            {"mcp-param-note", "present"},
+            {"mcp-param-region", "west"},
+            {"mcp-param-shard", "42"}
+          ]
+        },
+        {
+          %{
+            "enabled" => true,
+            "region" => "west",
+            "routing" => %{"shard" => 9_007_199_254_740_992}
+          },
+          [
+            {"mcp-param-enabled", "true"},
+            {"mcp-param-region", "west"},
+            {"mcp-param-shard", "9007199254740992"}
+          ]
+        }
+      ]
+
+      for {arguments, parameter_headers} <- cases do
+        conn =
+          post(
+            runtime,
+            Protocol.method(:tools_call),
+            %{"name" => "headers", "arguments" => arguments},
+            headers: [{"mcp-name", "headers"} | parameter_headers]
+          )
+
+        assert conn.status == 400
+        assert %{"error" => %{"code" => @header_mismatch}} = decode(conn)
+      end
+    end
+
+    test "preserves explicit null structured content", %{runtime: runtime} do
+      conn =
+        post(runtime, Protocol.method(:tools_call), %{"name" => "null"},
+          headers: [{"mcp-name", "null"}]
+        )
+
+      assert conn.status == 200
+      assert Map.fetch!(decode(conn)["result"], "structuredContent") == nil
     end
 
     test "returns a tool error as a successful JSON-RPC response with isError true", %{
@@ -447,6 +579,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
           {"content-type", "application/json"},
           {"accept", "application/json, text/event-stream"}
         ])
+
+      assert conn.status == 400
+      assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
+    end
+
+    test "rejects requests that violate the complete method-specific schema", %{runtime: runtime} do
+      capabilities = %{"extensions" => %{"example.extension/invalid" => "not-an-object"}}
+
+      conn =
+        post(
+          runtime,
+          Protocol.method(:tools_call),
+          %{"name" => "echo", "arguments" => %{"message" => "hi"}},
+          headers: [{"mcp-name", "echo"}],
+          meta: %{Protocol.meta_key(:client_capabilities) => capabilities}
+        )
 
       assert conn.status == 400
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
