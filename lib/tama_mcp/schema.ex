@@ -6,7 +6,14 @@ defmodule TamaMCP.Schema do
   # module owns the builder and the jsonschex boundary so tools never touch the
   # validator directly. Schemas are compiled once and reused.
 
+  alias __MODULE__.Walker
+
   @type compiled :: term()
+
+  @dialects [
+    "https://json-schema.org/draft/2020-12/schema",
+    "https://json-schema.org/draft/2020-12/schema#"
+  ]
 
   defmodule Error do
     @moduledoc false
@@ -21,9 +28,11 @@ defmodule TamaMCP.Schema do
   """
   @spec compile(map()) :: {:ok, compiled()} | {:error, String.t()}
   def compile(schema) when is_map(schema) do
-    case JSONSchex.compile(schema) do
-      {:ok, compiled} -> {:ok, compiled}
-      {:error, reason} -> {:error, format_compile_error(reason)}
+    with :ok <- validate_dialects(schema) do
+      case JSONSchex.compile(schema) do
+        {:ok, compiled} -> {:ok, compiled}
+        {:error, reason} -> {:error, format_compile_error(reason)}
+      end
     end
   end
 
@@ -102,7 +111,7 @@ defmodule TamaMCP.Schema do
       {:array, item} ->
         %{"type" => "array", "items" => type_schema(item)}
 
-      {:raw, map} when is_map(map) and map_size(map) > 0 ->
+      {:raw, map} when is_map(map) ->
         map
 
       primitive when primitive in @primitive_types ->
@@ -121,6 +130,36 @@ defmodule TamaMCP.Schema do
 
   defp enum_schema(_),
     do: raise(Error, message: "enum values must be a non-empty list")
+
+  defp validate_dialects(schema) do
+    with :ok <- validate_dialect(schema) do
+      Enum.reduce_while(Walker.children(schema), :ok, &validate_child/2)
+    end
+  end
+
+  defp validate_child(child, :ok) when is_map(child) do
+    case validate_dialects(child) do
+      :ok -> {:cont, :ok}
+      {:error, _reason} = error -> {:halt, error}
+    end
+  end
+
+  defp validate_child(_boolean_or_invalid, :ok), do: {:cont, :ok}
+
+  defp validate_dialect(schema) do
+    case Map.fetch(schema, "$schema") do
+      :error ->
+        :ok
+
+      {:ok, dialect} when dialect in @dialects ->
+        :ok
+
+      {:ok, dialect} ->
+        {:error,
+         "unsupported JSON Schema dialect #{inspect(dialect)}; " <>
+           "TamaMCP supports Draft 2020-12 only"}
+    end
+  end
 
   defp enum_kind!(values) do
     cond do

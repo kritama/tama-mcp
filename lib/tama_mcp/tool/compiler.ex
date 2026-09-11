@@ -70,13 +70,13 @@ defmodule TamaMCP.Tool.Compiler do
 
   def literal_schema!(expr, name, caller) do
     case literal_value!(expr, caller, "#{name} schema") do
-      map when is_map(map) and map_size(map) > 0 ->
+      map when is_map(map) ->
         map
 
       other ->
         raise compile_error(
                 caller,
-                "#{name}/1 expects a non-empty JSON Schema map literal, got: #{inspect(other)}"
+                "#{name}/1 expects a JSON Schema map literal, got: #{inspect(other)}"
               )
     end
   end

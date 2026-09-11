@@ -6,13 +6,26 @@ defmodule TamaMCP.Transport.StreamableHTTP.Wire do
   alias TamaMCP.Protocol
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
 
-  def result(conn, status, id, result, meta) do
-    body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
+  def result(conn, status, id, result, meta, runtime) do
+    with :ok <- validate_result(result, runtime.limits.max_result_bytes) do
+      body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
 
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, body)
-    |> then(&{&1, meta})
+      reply =
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, body)
+        |> then(&{&1, meta})
+
+      {:ok, reply}
+    end
+  end
+
+  def validate_result(result, maximum) do
+    case Jason.encode(result) do
+      {:ok, encoded} when byte_size(encoded) <= maximum -> :ok
+      {:ok, _encoded} -> {:error, :result_too_large}
+      {:error, _reason} -> {:error, :invalid_result}
+    end
   end
 
   def error(conn, id, error, meta, runtime, opts \\ []) do
@@ -31,15 +44,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Wire do
     |> put_resp_content_type("application/json")
     |> send_resp(status, body)
     |> then(&{&1, meta})
-  end
-
-  def server_meta(runtime) do
-    %{
-      Protocol.meta_key(:server_info) => %{
-        "name" => runtime.server.name(),
-        "version" => runtime.server.version()
-      }
-    }
   end
 
   def merge_meta(result, canonical) do

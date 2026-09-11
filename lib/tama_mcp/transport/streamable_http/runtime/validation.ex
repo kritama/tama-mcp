@@ -1,6 +1,8 @@
 defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   @moduledoc false
 
+  alias TamaMCP.Transport.StreamableHTTP.{Result, Wire}
+
   def options!(opts, allowed) do
     unless Keyword.keyword?(opts) do
       raise ArgumentError, "options must be a keyword list, got: #{inspect(opts)}"
@@ -116,6 +118,29 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     end
 
     Enum.each(tools, &schemas!(&1, limits.max_schema_bytes))
+    results!(server, limits.max_result_bytes)
+  end
+
+  defp results!(server, maximum) do
+    results = [
+      {"server/discover", Result.discover(server)},
+      {"tools/list", Result.tools(server)}
+    ]
+
+    Enum.each(results, fn {name, result} -> result!(name, result, maximum) end)
+  end
+
+  defp result!(name, result, maximum) do
+    case Wire.validate_result(result, maximum) do
+      :ok ->
+        :ok
+
+      {:error, :result_too_large} ->
+        raise ArgumentError, "#{name} result exceeds #{maximum} bytes (max_result_bytes)"
+
+      {:error, :invalid_result} ->
+        raise ArgumentError, "#{name} result is not JSON encodable"
+    end
   end
 
   defp schemas!(entry, maximum) do

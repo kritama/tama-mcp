@@ -8,7 +8,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
   alias TamaMCP.{Protocol, Response}
   alias TamaMCP.TestSupport.Server
-  alias TamaMCP.Transport.StreamableHTTP.{Plug, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Plug, Result, Wire}
 
   @version Protocol.version()
   @parse Protocol.error_code(:parse)
@@ -401,7 +401,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     end
 
     test "enforces the encoded tool result limit at the exact boundary" do
-      value = "fits"
+      value = String.duplicate("x", static_result_size())
 
       result =
         Response.success(content: [Response.text(value)])
@@ -435,13 +435,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     end
 
     test "rejects oversized content, structured content, and result metadata" do
-      value = String.duplicate("must-not-escape", 32)
+      maximum = static_result_size()
+      value = String.duplicate("must-not-escape", maximum)
 
       for placement <- ["content", "structured_content", "meta"] do
         {conn, log} =
           with_log(fn ->
             post(
-              result_runtime(128),
+              result_runtime(maximum),
               Protocol.method(:tools_call),
               result_params(placement, value),
               headers: [{"mcp-name", "result"}]
@@ -780,8 +781,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     Plug.init(
       server: TamaMCP.TestSupport.Server,
       authorization: TamaMCP.TestSupport.Authorization,
-      limits: [max_tool_result_bytes: maximum]
+      limits: [max_result_bytes: maximum]
     )
+  end
+
+  defp static_result_size do
+    [Result.discover(Server), Result.tools(Server)]
+    |> Enum.map(&(Jason.encode!(&1) |> byte_size()))
+    |> Enum.max()
   end
 
   defp result_params(placement, value) do

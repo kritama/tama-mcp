@@ -82,7 +82,7 @@ defmodule TamaMCP.ToolTest do
               "additionalProperties" => false
             })
 
-            raw_output_schema(%{"type" => "object", "properties" => %{}})
+            raw_output_schema(%{})
 
             @impl true
             def call(_input, _context) do
@@ -95,7 +95,8 @@ defmodule TamaMCP.ToolTest do
 
       {mod, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.RawTool, 0)
       assert mod.input_schema()["properties"]["x"]["type"] == "integer"
-      assert mod.output_schema()["type"] == "object"
+      assert mod.output_schema() == %{}
+      assert :ok = TamaMCP.Schema.validate(TamaMCP.Tool.output_validator(mod), %{"ok" => true})
     end
 
     test "raw input schemas compile statically reachable parameter headers" do
@@ -249,6 +250,24 @@ defmodule TamaMCP.ToolTest do
   end
 
   describe "strict declarations" do
+    test "keeps the object-root requirement for empty raw input schemas" do
+      assert_raise CompileError, ~r/input schema root must be a JSON object/, fn ->
+        compile_raw_tool(%{})
+      end
+    end
+
+    test "rejects raw schemas that explicitly declare unsupported dialects" do
+      schema = %{
+        "$schema" => "http://json-schema.org/draft-07/schema#",
+        "type" => "object",
+        "definitions" => %{"tenant" => %{"type" => "string"}}
+      }
+
+      assert_raise CompileError, ~r/unsupported JSON Schema dialect.*Draft 2020-12 only/, fn ->
+        compile_raw_tool(schema)
+      end
+    end
+
     test "rejects extra field arguments" do
       assert_raise CompileError, ~r/exactly 2 or 3 arguments/, fn ->
         compile_tool("ExtraField", "field(:value, :string, [], :ignored)")
@@ -335,6 +354,15 @@ defmodule TamaMCP.ToolTest do
           %{
             "type" => "object",
             "$defs" => %{
+              "hidden" => %{"type" => "string", "x-mcp-header" => "Hidden"}
+            }
+          },
+          ~r/not statically reachable/
+        },
+        {
+          %{
+            "type" => "object",
+            "definitions" => %{
               "hidden" => %{"type" => "string", "x-mcp-header" => "Hidden"}
             }
           },

@@ -3,7 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
   alias TamaMCP.{Context, Error, Protocol, Response, Schema}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Events, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Wire}
 
   @max_detail_bytes 512
 
@@ -136,13 +136,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   defp complete(conn, request, module, response, runtime, base) do
     with :ok <- Response.validate(response),
          :ok <- structured(module, response),
-         result = Response.encode(response) |> Wire.merge_meta(Wire.server_meta(runtime)),
+         result = Response.encode(response) |> Wire.merge_meta(Result.metadata(runtime.server)),
          :ok <- protocol_result(result),
-         :ok <- result_size(result, runtime.limits.max_tool_result_bytes) do
-      reply = Wire.result(conn, 200, request.request_id, result, Map.put(base, :status, :ok))
-
+         {:ok, reply} <-
+           Wire.result(
+             conn,
+             200,
+             request.request_id,
+             result,
+             Map.put(base, :status, :ok),
+             runtime
+           ) do
       Events.emit(runtime, [:tool, :execution], %{status: :ok}, elem(reply, 1))
-
       reply
     else
       {:error, reason} -> unexpected(conn, request, runtime, base, reason)
@@ -167,14 +172,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     case ProtocolSchema.validate(:call_tool_result, result) do
       :ok -> :ok
       {:error, _details} -> {:error, :invalid_protocol_result}
-    end
-  end
-
-  defp result_size(result, maximum) do
-    case Jason.encode(result) do
-      {:ok, encoded} when byte_size(encoded) <= maximum -> :ok
-      {:ok, _encoded} -> {:error, :tool_result_too_large}
-      {:error, _reason} -> {:error, :invalid_protocol_result}
     end
   end
 
@@ -221,7 +218,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
          :invalid_tool_return,
          :invalid_protocol_result,
          :missing_structured_content,
-         :tool_result_too_large
+         :result_too_large
        ] do
       Events.log(%RuntimeError{message: inspect(reason)})
     end

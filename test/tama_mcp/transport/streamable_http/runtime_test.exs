@@ -3,7 +3,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
 
   use ExUnit.Case
 
-  alias TamaMCP.Transport.StreamableHTTP.Runtime
+  alias TamaMCP.Transport.StreamableHTTP.{Result, Runtime}
+
+  defmodule Verbose do
+    @moduledoc false
+
+    def name, do: "verbose"
+    def version, do: "1.0.0"
+    def instructions, do: String.duplicate("instruction", 32)
+    def tools, do: []
+    def tool(_name), do: nil
+  end
 
   @valid [
     server: TamaMCP.TestSupport.Server,
@@ -24,7 +34,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.safe_metadata == nil
       assert runtime.context_headers == []
       assert runtime.limits.max_body_bytes == 1_048_576
-      assert runtime.limits.max_tool_result_bytes == 1_048_576
+      assert runtime.limits.max_result_bytes == 1_048_576
       assert runtime.limits.max_tools_per_server == 256
       assert runtime.limits.request_timeout_ms == 30_000
     end
@@ -203,6 +213,28 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
     test "rejects catalogs that exceed the configured tool limit" do
       assert_raise ArgumentError, ~r/max_tools_per_server/, fn ->
         Runtime.build(@valid ++ [limits: [max_tools_per_server: 1]])
+      end
+    end
+
+    test "rejects discovery results that exceed the configured result limit" do
+      assert_raise ArgumentError, ~r/server\/discover result exceeds.*max_result_bytes/, fn ->
+        Runtime.build(
+          server: Verbose,
+          authorization: TamaMCP.TestSupport.Authorization,
+          limits: [max_result_bytes: 64]
+        )
+      end
+    end
+
+    test "rejects tool-list results that exceed the configured result limit" do
+      discovery_size =
+        Result.discover(TamaMCP.TestSupport.Server) |> Jason.encode!() |> byte_size()
+
+      assert Result.tools(TamaMCP.TestSupport.Server) |> Jason.encode!() |> byte_size() >
+               discovery_size
+
+      assert_raise ArgumentError, ~r/tools\/list result exceeds.*max_result_bytes/, fn ->
+        Runtime.build(@valid ++ [limits: [max_result_bytes: discovery_size]])
       end
     end
   end

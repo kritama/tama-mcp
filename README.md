@@ -50,7 +50,7 @@ The implemented Phase 1 package supports:
 - `server/discover`, `tools/list`, and `tools/call`;
 - authorization-aware tool visibility and scope enforcement;
 - application-supplied authorization decisions and safe context values;
-- bounded request execution, tool results, errors, headers, and telemetry; and
+- bounded request execution, successful results, errors, headers, and telemetry; and
 - reusable conformance validation against the vendored core schema.
 
 It does not provide an MCP client, STDIO transport, legacy initialization or

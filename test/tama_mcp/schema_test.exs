@@ -15,9 +15,48 @@ defmodule TamaMCP.SchemaTest do
     assert reason =~ "invalid JSON schema"
   end
 
+  test "accepts Draft 2020-12 schemas and rejects unsupported explicit dialects" do
+    for dialect <- [
+          "https://json-schema.org/draft/2020-12/schema",
+          "https://json-schema.org/draft/2020-12/schema#"
+        ] do
+      assert {:ok, _compiled} = Schema.compile(%{"$schema" => dialect, "type" => "string"})
+    end
+
+    assert {:error, reason} =
+             Schema.compile(%{
+               "$schema" => "http://json-schema.org/draft-07/schema#",
+               "type" => "object"
+             })
+
+    assert reason =~ "unsupported JSON Schema dialect"
+    assert reason =~ "Draft 2020-12 only"
+  end
+
+  test "checks nested schemas without interpreting instance-valued keywords" do
+    assert {:error, reason} =
+             Schema.compile(%{
+               "type" => "object",
+               "$defs" => %{
+                 "legacy" => %{
+                   "$schema" => "http://json-schema.org/draft-07/schema#",
+                   "type" => "string"
+                 }
+               }
+             })
+
+    assert reason =~ "unsupported JSON Schema dialect"
+
+    assert {:ok, _compiled} =
+             Schema.compile(%{
+               "const" => %{"$schema" => "http://json-schema.org/draft-07/schema#"}
+             })
+  end
+
   test "builds raw, array, and object schemas with explicit openness" do
     raw = %{"type" => "object", "required" => ["id"]}
     assert Schema.type_schema({:raw, raw}) == raw
+    assert Schema.type_schema({:raw, %{}}) == %{}
 
     assert Schema.type_schema({:array, :boolean}) == %{
              "type" => "array",

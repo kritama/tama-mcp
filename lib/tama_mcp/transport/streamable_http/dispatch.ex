@@ -3,7 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
 
   alias TamaMCP.{Error, Protocol}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Execute, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Execute, Result, Wire}
 
   def call(conn, request, decision, runtime, base) do
     discover = Protocol.method(:server_discover)
@@ -32,40 +32,20 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
   end
 
   defp discover(conn, request, runtime, base) do
-    result = %{
-      "resultType" => Protocol.result_type(:complete),
-      "supportedVersions" => Protocol.supported_versions(),
-      "capabilities" => %{"tools" => %{}},
-      "ttlMs" => 0,
-      "cacheScope" => "private",
-      "_meta" => Wire.server_meta(runtime)
-    }
-
-    result =
-      case runtime.server.instructions() do
-        nil -> result
-        instructions -> Map.put(result, "instructions", instructions)
-      end
-
-    protocol_result(conn, request, result, :discover_result, runtime, base)
+    protocol_result(
+      conn,
+      request,
+      Result.discover(runtime.server),
+      :discover_result,
+      runtime,
+      base
+    )
   end
 
   defp list(conn, request, decision, runtime, base) do
     case request.params["cursor"] do
       nil ->
-        tools =
-          runtime.server.tools()
-          |> Enum.filter(&visible?(&1, decision.scopes))
-          |> Enum.map(&Map.put(&1.module.definition(), "name", &1.name))
-
-        result = %{
-          "resultType" => Protocol.result_type(:complete),
-          "tools" => tools,
-          "ttlMs" => 0,
-          "cacheScope" => "private",
-          "_meta" => Wire.server_meta(runtime)
-        }
-
+        result = Result.tools(runtime.server, decision.scopes)
         protocol_result(conn, request, result, :list_tools_result, runtime, base)
 
       _cursor ->
@@ -85,21 +65,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
   defp protocol_result(conn, request, result, kind, runtime, base) do
     case ProtocolSchema.validate(kind, result) do
       :ok ->
-        Wire.result(conn, 200, request.request_id, result, ok_meta(base, request))
+        case Wire.result(conn, 200, request.request_id, result, ok_meta(base, request), runtime) do
+          {:ok, reply} -> reply
+          {:error, reason} -> result_error(conn, request, runtime, base, reason)
+        end
 
       {:error, _details} ->
-        Wire.error(
-          conn,
-          request.request_id,
-          Error.internal(),
-          Map.merge(base, %{status: :exception, method: request.method, reason: :invalid_result}),
-          runtime
-        )
+        result_error(conn, request, runtime, base, :invalid_result)
     end
   end
 
-  defp visible?(entry, granted) do
-    Enum.all?(entry.module.scopes(), &(&1 in granted))
+  defp result_error(conn, request, runtime, base, reason) do
+    Wire.error(
+      conn,
+      request.request_id,
+      Error.internal(),
+      Map.merge(base, %{status: :exception, method: request.method, reason: reason}),
+      runtime
+    )
   end
 
   defp ok_meta(base, request), do: Map.merge(base, %{status: :ok, method: request.method})
