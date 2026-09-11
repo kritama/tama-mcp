@@ -96,7 +96,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     do: {:error, TamaMCP.Error.invalid_request("method must be a non-empty string")}
 
   defp valid_id(id) when is_integer(id), do: {:ok, id}
-  defp valid_id(id) when is_binary(id) and id != "", do: {:ok, id}
+  defp valid_id(id) when is_binary(id), do: {:ok, id}
 
   defp valid_id(_id) do
     {:error,
@@ -191,7 +191,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
 
   defp request_id(body) do
     case Jason.decode(body) do
-      {:ok, %{"id" => id}} when is_integer(id) or (is_binary(id) and id != "") -> id
+      {:ok, %{"id" => id}} when is_integer(id) or is_binary(id) -> id
       _ -> nil
     end
   end

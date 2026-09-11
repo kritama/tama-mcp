@@ -16,6 +16,8 @@ defmodule TamaMCPTest do
 
     assert TamaMCP.Protocol.name_scoped_methods() == [
              :tools_call,
+             :resources_read,
+             :prompts_get,
              :tasks_get,
              :tasks_update,
              :tasks_cancel

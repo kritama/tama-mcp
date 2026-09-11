@@ -114,6 +114,25 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
              )
   end
 
+  test "name headers validate known name-scoped methods before dispatch" do
+    requests = [
+      {Protocol.method(:resources_read), %{"uri" => "tama://resource/1"}, "tama://resource/1"},
+      {Protocol.method(:prompts_get), %{"name" => "summarize"}, "summarize"}
+    ]
+
+    for {method, params, name} <- requests do
+      request = request(method, params)
+
+      assert {:ok, %{name: ^name}} =
+               Headers.match(conn([{"mcp-method", method}, {"mcp-name", name}]), request)
+
+      assert {:error, _error} =
+               Headers.match(conn([{"mcp-method", method}, {"mcp-name", "other"}]), request)
+
+      assert {:error, _error} = Headers.match(conn([{"mcp-method", method}]), request)
+    end
+  end
+
   test "request parsing rejects malformed envelope fields" do
     valid_conn = conn([{"mcp-method", Protocol.method(:server_discover)}])
 
@@ -132,6 +151,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
         "method" => "server/discover",
         "params" => params()
       }),
+      encode(%{"jsonrpc" => "2.0", "method" => "server/discover", "params" => params()}),
       encode(%{"jsonrpc" => "2.0", "id" => 1, "method" => "server/discover"}),
       encode(%{"jsonrpc" => "2.0", "id" => 1, "method" => "server/discover", "params" => %{}})
     ]

@@ -48,6 +48,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
                "version" => "0.0.1-test"
              }
     end
+
+    test "accepts an empty string request ID", %{runtime: runtime} do
+      conn = post(runtime, Protocol.method(:server_discover), %{}, id: "")
+
+      assert conn.status == 200
+      assert %{"id" => "", "jsonrpc" => "2.0", "result" => _result} = decode(conn)
+    end
   end
 
   describe "tools/list" do
@@ -698,6 +705,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         {"tasks/get", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
         {"tasks/update", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
         {"tasks/cancel", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
+        {Protocol.method(:resources_read), %{"uri" => "tama://resource/1"},
+         [{"mcp-name", "tama://resource/1"}]},
+        {Protocol.method(:prompts_get), %{"name" => "summarize"}, [{"mcp-name", "summarize"}]},
         {"subscriptions/listen", %{}, []}
       ]
 
@@ -706,6 +716,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         assert conn.status == 404
         assert %{"error" => %{"code" => @method_not_found}} = decode(conn)
       end
+    end
+
+    test "preserves an empty string request ID in boundary errors", %{runtime: runtime} do
+      conn =
+        post(runtime, Protocol.method(:server_discover), %{},
+          id: "",
+          headers: [{"mcp-name", "unexpected"}]
+        )
+
+      assert conn.status == 400
+      assert %{"id" => "", "error" => %{"code" => @header_mismatch}} = decode(conn)
     end
 
     test "fails closed when authorization rejects the request", %{runtime: runtime} do

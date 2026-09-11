@@ -63,20 +63,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
     expected = expected_name(request)
 
     case {expected, values} do
-      {nil, []} ->
+      {:unscoped, []} ->
         {:ok, nil}
 
-      {nil, _} ->
+      {:unscoped, _} ->
         {:error, mismatch("Mcp-Name header is not expected for #{inspect(request.method)}")}
 
-      {_, []} ->
+      {{:scoped, _source, _expected}, []} ->
         {:error, mismatch("Mcp-Name header is required for #{inspect(request.method)}")}
 
-      {_, [_first, _second | _]} ->
+      {{:scoped, _source, _expected}, [_first, _second | _]} ->
         {:error, mismatch("Mcp-Name header must be a single value")}
 
-      {expected, [raw]} ->
+      {{:scoped, _source, expected}, [raw]} when is_binary(expected) ->
         compare_name(raw, expected)
+
+      {{:scoped, source, _expected}, [_raw]} ->
+        {:error, mismatch("Mcp-Name source params.#{source} must be a string")}
     end
   end
 
@@ -95,19 +98,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
   end
 
   defp expected_name(%{method: method, params: params}) do
-    cond do
-      method == Protocol.method(:tools_call) -> non_empty(params["name"])
-      method in task_methods() -> non_empty(params["taskId"])
-      true -> nil
+    case Protocol.name_source(method) do
+      nil -> :unscoped
+      source -> {:scoped, source, params[source]}
     end
   end
-
-  defp task_methods do
-    Enum.map([:tasks_get, :tasks_update, :tasks_cancel], &Protocol.method/1)
-  end
-
-  defp non_empty(value) when is_binary(value) and value != "", do: value
-  defp non_empty(_value), do: nil
 
   @doc false
   def decode(value) do

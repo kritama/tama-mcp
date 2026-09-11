@@ -15,6 +15,8 @@ defmodule TamaMCP.Protocol do
   @tasks_extension "io.modelcontextprotocol/tasks"
 
   @methods %{
+    prompts_get: "prompts/get",
+    resources_read: "resources/read",
     server_discover: "server/discover",
     tools_list: "tools/list",
     tools_call: "tools/call",
@@ -23,6 +25,19 @@ defmodule TamaMCP.Protocol do
     tasks_cancel: "tasks/cancel",
     subscriptions_listen: "subscriptions/listen"
   }
+
+  @name_sources [
+    tools_call: "name",
+    resources_read: "uri",
+    prompts_get: "name",
+    tasks_get: "taskId",
+    tasks_update: "taskId",
+    tasks_cancel: "taskId"
+  ]
+
+  @name_sources_by_method Map.new(@name_sources, fn {method, source} ->
+                            {Map.fetch!(@methods, method), source}
+                          end)
 
   @headers %{
     protocol_version: "MCP-Protocol-Version",
@@ -84,12 +99,14 @@ defmodule TamaMCP.Protocol do
   def methods, do: @methods
 
   @doc """
-  Returns the set of method atoms whose `Mcp-Name` header carries the tool
-  name (`tools/call`) or the task ID (`tasks/get`, `tasks/update`,
-  `tasks/cancel`).
+  Returns the set of method atoms that require the `Mcp-Name` header.
   """
   @spec name_scoped_methods() :: [atom()]
-  def name_scoped_methods, do: [:tools_call, :tasks_get, :tasks_update, :tasks_cancel]
+  def name_scoped_methods, do: Keyword.keys(@name_sources)
+
+  @doc false
+  @spec name_source(String.t()) :: String.t() | nil
+  def name_source(method) when is_binary(method), do: Map.get(@name_sources_by_method, method)
 
   @doc "Returns the standard HTTP header name for a known header atom."
   @spec header(atom()) :: String.t()
