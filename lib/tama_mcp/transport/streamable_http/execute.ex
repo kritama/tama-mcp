@@ -3,7 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
   alias TamaMCP.{Context, Error, Protocol, Response, Schema}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Runner, Wire}
 
   @max_detail_bytes 512
 
@@ -93,7 +93,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   defp run(conn, request, module, arguments, decision, runtime, base) do
     context = context(conn, request, decision, runtime)
 
-    case invoke(module, arguments, context, runtime.limits.request_timeout_ms) do
+    case Runner.run(module, arguments, context, runtime.limits.request_timeout_ms) do
       {:ok, {:ok, %Response{} = response}} ->
         complete(conn, request, module, response, runtime, base)
 
@@ -108,28 +108,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
       {:error, reason} ->
         unexpected(conn, request, runtime, base, reason)
-    end
-  end
-
-  defp invoke(module, arguments, context, timeout) do
-    caller = self()
-    tag = make_ref()
-
-    {pid, monitor} =
-      spawn_monitor(fn -> send(caller, {tag, module.call(arguments, context)}) end)
-
-    receive do
-      {^tag, result} ->
-        Process.demonitor(monitor, [:flush])
-        {:ok, result}
-
-      {:DOWN, ^monitor, :process, ^pid, reason} ->
-        {:error, reason}
-    after
-      timeout ->
-        Process.exit(pid, :kill)
-        receive do: ({:DOWN, ^monitor, :process, ^pid, _reason} -> :ok)
-        {:error, :timeout}
     end
   end
 

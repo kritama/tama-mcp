@@ -40,22 +40,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.Body do
   end
 
   defp accept(headers) do
-    case header(headers, "accept") do
-      {:ok, value} ->
-        accepted =
-          value
-          |> String.split(",")
-          |> Enum.filter(&(quality(&1) > 0.0))
-          |> Enum.map(&media/1)
+    accepted =
+      headers
+      |> values("accept")
+      |> Enum.flat_map(&String.split(&1, ","))
+      |> Enum.filter(&(quality(&1) > 0.0))
+      |> Enum.map(&media/1)
 
-        if @json in accepted and @event_stream in accepted do
-          :ok
-        else
-          accept_error()
-        end
-
-      _ ->
-        accept_error()
+    if @json in accepted and @event_stream in accepted do
+      :ok
+    else
+      accept_error()
     end
   end
 
@@ -117,11 +112,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Body do
   end
 
   defp header(headers, name) do
-    case for({key, value} <- headers, String.downcase(key) == name, do: value) do
+    case values(headers, name) do
       [] -> :missing
       [value] -> {:ok, value}
       _ -> :duplicate
     end
+  end
+
+  defp values(headers, name) do
+    for {key, value} <- headers, String.downcase(key) == name, do: value
   end
 
   defp media(value) do

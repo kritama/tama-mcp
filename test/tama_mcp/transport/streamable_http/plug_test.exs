@@ -529,6 +529,36 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert conn.status == 400
     end
 
+    test "combines repeated Accept field lines", %{runtime: runtime} do
+      method = Protocol.method(:server_discover)
+
+      conn =
+        raw_post(runtime, Jason.encode!(envelope(method, %{"_meta" => base_meta()})), [
+          {"mcp-protocol-version", @version},
+          {"mcp-method", method},
+          {"content-type", "application/json"},
+          {"accept", "application/json"},
+          {"accept", "text/event-stream"}
+        ])
+
+      assert conn.status == 200
+    end
+
+    test "honors q=0 across repeated Accept field lines", %{runtime: runtime} do
+      method = Protocol.method(:server_discover)
+
+      conn =
+        raw_post(runtime, Jason.encode!(envelope(method, %{"_meta" => base_meta()})), [
+          {"mcp-protocol-version", @version},
+          {"mcp-method", method},
+          {"content-type", "application/json"},
+          {"accept", "application/json;q=0"},
+          {"accept", "text/event-stream"}
+        ])
+
+      assert conn.status == 400
+    end
+
     test "enforces the total body byte limit across adapter chunks" do
       runtime =
         Plug.init(

@@ -30,3 +30,8 @@ The project follows Semantic Versioning and uses Conventional Commits.
   from public response and error data.
 - Accept empty raw output schemas while rejecting explicitly declared JSON
   Schema dialects other than Draft 2020-12.
+- Normalize authorization exits and throws without exposing adapter failure
+  details.
+- Tie synchronous tool workers to their request lifetime and execution deadline.
+- Combine repeated list-valued `Accept` fields while retaining strict handling
+  for single-valued transport headers.

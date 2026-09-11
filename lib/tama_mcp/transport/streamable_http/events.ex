@@ -8,10 +8,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Events do
   @max_value_bytes 512
   @base_keys [:method, :reason, :server, :status, :tool]
 
-  def exception(exception), do: exception.__struct__ |> to_string() |> truncate()
+  def failure(%module{}), do: module |> to_string() |> truncate()
+  def failure({kind, _reason}) when kind in [:exit, :throw], do: Atom.to_string(kind)
 
-  def log(exception) do
-    Logger.warning("TamaMCP unexpected runtime failure: #{exception(exception)}")
+  def log(failure) do
+    Logger.warning("TamaMCP unexpected runtime failure: #{failure(failure)}")
   end
 
   def emit(runtime, suffix, measurements, metadata) do
@@ -32,6 +33,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Events do
         safe_metadata.(meta[:method] || meta[:reason] || "unknown", meta)
       rescue
         _exception -> %{}
+      catch
+        _kind, _reason -> %{}
       end
 
     merged = if is_map(extras), do: Map.merge(meta, extras), else: meta

@@ -20,15 +20,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     started = System.monotonic_time()
     Events.emit(runtime, [:request, :start], %{}, base)
 
-    {conn, meta} =
-      try do
-        handle(conn, runtime, base)
-      rescue
-        exception ->
-          meta = Map.merge(base, %{status: :exception, reason: Events.exception(exception)})
-          Events.emit(runtime, [:request, :exception], %{}, meta)
-          unexpected(conn, runtime, base, exception)
-      end
+    {conn, meta} = guarded_handle(conn, runtime, base)
 
     Events.emit(
       runtime,
@@ -38,6 +30,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     )
 
     conn
+  end
+
+  defp guarded_handle(conn, runtime, base) do
+    handle(conn, runtime, base)
+  rescue
+    exception -> unexpected(conn, runtime, base, exception)
+  catch
+    kind, reason when kind in [:exit, :throw] ->
+      unexpected(conn, runtime, base, {kind, reason})
   end
 
   defp handle(conn, runtime, base) do
@@ -151,9 +152,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     )
   end
 
-  defp unexpected(conn, runtime, base, exception) do
-    Events.log(exception)
-    meta = Map.merge(base, %{status: :exception, reason: Events.exception(exception)})
+  defp unexpected(conn, runtime, base, failure) do
+    Events.log(failure)
+    meta = Map.merge(base, %{status: :exception, reason: Events.failure(failure)})
+    Events.emit(runtime, [:request, :exception], %{}, meta)
     Wire.error(conn, nil, TamaMCP.Error.internal(), meta, runtime)
   end
 end

@@ -246,8 +246,10 @@ The tool callback contract is:
 `CallToolResult.isError` is `true`; this remains a completed task when executed
 asynchronously. `{:error, Error.t()}` represents a JSON-RPC execution failure
 and maps an asynchronous task to `failed`. Expected tool and domain failures do
-not raise. Unexpected exceptions are caught by the outer runtime boundary and
-converted to a redacted internal error.
+not raise. Unexpected exceptions, exits, and throws are caught by the outer
+runtime boundary and converted to a redacted internal error. A synchronous tool
+worker is tied to the request process lifetime and its configured execution
+deadline; terminating either boundary terminates the worker.
 
 Durable task creation is not a tool callback return variant. The runtime selects
 synchronous or task execution from the tool's task policy and the capabilities
@@ -1038,8 +1040,9 @@ parse, invalid request, method not found, invalid params, internal error,
 unsupported protocol version, header mismatch, and missing capability errors.
 
 Expected client, authorization, task-state, and domain failures return values;
-they do not raise. Unexpected exceptions are captured at the outer runtime
-boundary, logged with redaction, and returned as a generic internal error.
+they do not raise. Unexpected exceptions, exits, and throws are captured at the
+outer runtime boundary, logged with redaction, and returned as a generic
+internal error.
 
 All encoded maps must be JSON-safe. Adapter structs, exceptions, changesets,
 PIDs, references, and stack traces must never be serialized to clients.

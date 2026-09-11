@@ -38,6 +38,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.EventsTest do
     def authenticate(_conn, _opts), do: raise("adapter detail must not escape")
   end
 
+  defmodule Exiting do
+    @moduledoc false
+
+    use TamaMCP.Authorization
+
+    @impl true
+    def authenticate(_conn, _opts), do: exit({:adapter_secret, "must not escape"})
+  end
+
   test "authentication runs before malformed transport input is rejected" do
     runtime = runtime(Authorization, authorization_options: [test: self()])
     conn = request(runtime, "not-json")
@@ -77,6 +86,36 @@ defmodule TamaMCP.Transport.StreamableHTTP.EventsTest do
     refute inspect(metadata) =~ "adapter detail"
     assert log =~ "TamaMCP unexpected runtime failure: Elixir.RuntimeError"
     refute log =~ "adapter detail"
+  end
+
+  test "authorization exits become redacted internal errors" do
+    event = [:tama_mcp, :test, :request, :exception]
+    handler = "events-exit-test-#{System.unique_integer([:positive])}"
+
+    :ok = :telemetry.attach(handler, event, &__MODULE__.handle/4, self())
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {conn, log} = with_log(fn -> request(runtime(Exiting), discover_body()) end)
+
+    assert conn.status == 500
+    assert Jason.decode!(conn.resp_body)["error"]["message"] == "Internal error"
+    assert_receive {:event, ^event, %{}, metadata}
+    assert metadata.reason == "exit"
+    refute inspect(metadata) =~ "adapter_secret"
+    assert log =~ "TamaMCP unexpected runtime failure: exit"
+    refute log =~ "adapter_secret"
+  end
+
+  test "safe metadata exits are ignored" do
+    callback = fn _kind, _meta -> exit({:metadata_secret, "must not escape"}) end
+
+    conn =
+      request(
+        runtime(TamaMCP.TestSupport.Authorization, safe_metadata: callback),
+        discover_body()
+      )
+
+    assert conn.status == 200
   end
 
   test "metadata is bounded even without an application callback" do
