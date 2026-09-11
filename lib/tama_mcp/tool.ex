@@ -1,0 +1,127 @@
+defmodule TamaMCP.Tool do
+  @moduledoc """
+  Compile-time tool DSL.
+
+  A tool declares metadata, task policy, schemas, and a `call/2` callback.
+  Schema blocks accept only literal `field/2` and `field/3` declarations and
+  default to `additionalProperties: false`.
+  """
+
+  alias TamaMCP.Tool.{Cache, Compiler}
+
+  @callback call(input :: map(), context :: TamaMCP.Context.t()) ::
+              {:ok, TamaMCP.Response.t()} | {:error, TamaMCP.Error.t()}
+
+  defmodule Metadata do
+    @moduledoc "Compiled metadata and wire schemas for a tool."
+
+    defstruct [
+      :task,
+      :scopes,
+      :description,
+      :title,
+      :annotations,
+      :input_schema,
+      :output_schema
+    ]
+
+    @type t :: %__MODULE__{
+            task: :disabled | :optional | :required,
+            scopes: [String.t()],
+            description: String.t() | nil,
+            title: String.t() | nil,
+            annotations: map() | nil,
+            input_schema: map(),
+            output_schema: map() | nil
+          }
+  end
+
+  defmacro __using__(opts) do
+    {task, scopes, description, title, annotations} = __configure__(opts)
+
+    quote bind_quoted: [
+            task: task,
+            scopes: scopes,
+            description: description,
+            title: title,
+            annotations: annotations
+          ] do
+      import TamaMCP.Tool,
+        only: [
+          input_schema: 1,
+          input_schema: 2,
+          output_schema: 1,
+          output_schema: 2,
+          raw_input_schema: 1,
+          raw_output_schema: 1
+        ]
+
+      @behaviour TamaMCP.Tool
+      @tama_mcp_tool true
+      @tama_mcp_task task
+      @tama_mcp_scopes scopes
+      @tama_mcp_description description
+      @tama_mcp_title title
+      @tama_mcp_annotations annotations
+      @tama_mcp_input_schema nil
+      @tama_mcp_output_schema nil
+      @before_compile TamaMCP.Tool
+    end
+  end
+
+  @doc false
+  def __configure__(opts), do: Compiler.configure(opts)
+
+  defmacro input_schema(opts \\ [], do: block) do
+    Compiler.ensure_schema_available!(__CALLER__, :input)
+    schema_opts = Compiler.schema_options!(opts, __CALLER__, "input_schema")
+    fields = Compiler.collect_fields(block, __CALLER__)
+    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+
+    quote do
+      @tama_mcp_input_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+    end
+  end
+
+  defmacro output_schema(opts \\ [], do: block) do
+    Compiler.ensure_schema_available!(__CALLER__, :output)
+    schema_opts = Compiler.schema_options!(opts, __CALLER__, "output_schema")
+    fields = Compiler.collect_fields(block, __CALLER__)
+    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+
+    quote do
+      @tama_mcp_output_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+    end
+  end
+
+  defmacro raw_input_schema(schema) do
+    Compiler.ensure_schema_available!(__CALLER__, :input)
+    schema = Compiler.literal_schema!(schema, "raw_input_schema", __CALLER__)
+
+    quote do
+      @tama_mcp_input_schema {:raw, unquote(Macro.escape(schema))}
+    end
+  end
+
+  defmacro raw_output_schema(schema) do
+    Compiler.ensure_schema_available!(__CALLER__, :output)
+    schema = Compiler.literal_schema!(schema, "raw_output_schema", __CALLER__)
+
+    quote do
+      @tama_mcp_output_schema {:raw, unquote(Macro.escape(schema))}
+    end
+  end
+
+  defmacro __before_compile__(env), do: Compiler.before_compile(env)
+
+  @doc false
+  def input_validator(module), do: Cache.fetch(module, :input, module.input_schema())
+
+  @doc false
+  def output_validator(module) do
+    case module.output_schema() do
+      nil -> nil
+      schema -> Cache.fetch(module, :output, schema)
+    end
+  end
+end

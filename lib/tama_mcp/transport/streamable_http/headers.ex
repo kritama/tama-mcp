@@ -1,0 +1,118 @@
+defmodule TamaMCP.Transport.StreamableHTTP.Headers do
+  @moduledoc false
+
+  import Plug.Conn, only: [get_req_header: 2]
+
+  alias TamaMCP.Protocol
+
+  @base64_sentinel ~r/\A=\?base64\?.*\?=\z/
+
+  def validate_version(conn) do
+    version = Protocol.version()
+
+    case get_req_header(conn, Protocol.header_key(:protocol_version)) do
+      [] -> {:error, mismatch(Protocol.header(:protocol_version) <> " header is required")}
+      [^version] -> :ok
+      [value] -> {:error, TamaMCP.Error.unsupported_protocol_version(value)}
+      _ -> {:error, mismatch(Protocol.header(:protocol_version) <> " must be a single value")}
+    end
+  end
+
+  def match(conn, request) do
+    with :ok <- match_method(conn, request),
+         {:ok, name} <- match_name(conn, request) do
+      {:ok, %{request | name: name}}
+    end
+  end
+
+  defp match_method(conn, request) do
+    case get_req_header(conn, Protocol.header_key(:method)) do
+      [] ->
+        {:error, mismatch("Mcp-Method header is required")}
+
+      [method] when method == request.method ->
+        :ok
+
+      [method] ->
+        {:error,
+         mismatch(
+           "Mcp-Method header #{inspect(method)} does not match #{inspect(request.method)}"
+         )}
+
+      _ ->
+        {:error, mismatch("Mcp-Method header must be a single value")}
+    end
+  end
+
+  defp match_name(conn, request) do
+    values = get_req_header(conn, Protocol.header_key(:name))
+    expected = expected_name(request)
+
+    case {expected, values} do
+      {nil, []} ->
+        {:ok, nil}
+
+      {nil, _} ->
+        {:error, mismatch("Mcp-Name header is not expected for #{inspect(request.method)}")}
+
+      {_, []} ->
+        {:error, mismatch("Mcp-Name header is required for #{inspect(request.method)}")}
+
+      {_, [_first, _second | _]} ->
+        {:error, mismatch("Mcp-Name header must be a single value")}
+
+      {expected, [raw]} ->
+        compare_name(raw, expected)
+    end
+  end
+
+  defp compare_name(raw, expected) do
+    case decode(raw) do
+      {:ok, ^expected} ->
+        {:ok, expected}
+
+      {:ok, decoded} ->
+        {:error,
+         mismatch("Mcp-Name header #{inspect(decoded)} does not match #{inspect(expected)}")}
+
+      {:error, reason} ->
+        {:error, mismatch("Mcp-Name header is malformed: #{reason}")}
+    end
+  end
+
+  defp expected_name(%{method: method, params: params}) do
+    cond do
+      method == Protocol.method(:tools_call) -> non_empty(params["name"])
+      method in task_methods() -> non_empty(params["taskId"])
+      true -> nil
+    end
+  end
+
+  defp task_methods do
+    Enum.map([:tasks_get, :tasks_update, :tasks_cancel], &Protocol.method/1)
+  end
+
+  defp non_empty(value) when is_binary(value) and value != "", do: value
+  defp non_empty(_value), do: nil
+
+  defp decode(value) do
+    if value =~ @base64_sentinel, do: decode_sentinel(value), else: valid_utf8(value)
+  end
+
+  defp decode_sentinel(value) do
+    inner = String.slice(value, 9, byte_size(value) - 11)
+
+    case Base.decode64(inner) do
+      {:ok, bytes} -> valid_utf8(bytes)
+      :error -> {:error, "invalid Base64 sentinel payload"}
+    end
+  end
+
+  defp valid_utf8(value) do
+    if String.valid?(value), do: {:ok, value}, else: {:error, "invalid UTF-8"}
+  end
+
+  defp mismatch(message) do
+    TamaMCP.Error.header_mismatch("Header mismatch: " <> message)
+  end
+end
