@@ -60,4 +60,18 @@ defmodule TamaMCP.ResponseTest do
     assert {:error, :invalid_structured_content_presence} =
              Response.validate(%Response{structured_content?: :invalid})
   end
+
+  test "validation rejects encodable structs and non-string JSON object keys" do
+    struct = %TamaMCP.TestSupport.Encodable{secret: "must-not-escape"}
+    assert {:ok, _encoded} = Jason.encode(struct)
+
+    assert {:error, :non_json_safe} =
+             Response.validate(Response.success(structured_content: struct))
+
+    assert {:error, :non_json_safe} =
+             Response.validate(Response.success(meta: %{"nested" => [struct]}))
+
+    assert {:error, :non_json_safe} =
+             Response.validate(Response.success(structured_content: %{atom_key: "value"}))
+  end
 end

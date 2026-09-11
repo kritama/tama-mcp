@@ -137,7 +137,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     with :ok <- Response.validate(response),
          :ok <- structured(module, response),
          result = Response.encode(response) |> Wire.merge_meta(Wire.server_meta(runtime)),
-         :ok <- protocol_result(result) do
+         :ok <- protocol_result(result),
+         :ok <- result_size(result, runtime.limits.max_tool_result_bytes) do
       reply = Wire.result(conn, 200, request.request_id, result, Map.put(base, :status, :ok))
 
       Events.emit(runtime, [:tool, :execution], %{status: :ok}, elem(reply, 1))
@@ -166,6 +167,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     case ProtocolSchema.validate(:call_tool_result, result) do
       :ok -> :ok
       {:error, _details} -> {:error, :invalid_protocol_result}
+    end
+  end
+
+  defp result_size(result, maximum) do
+    case Jason.encode(result) do
+      {:ok, encoded} when byte_size(encoded) <= maximum -> :ok
+      {:ok, _encoded} -> {:error, :tool_result_too_large}
+      {:error, _reason} -> {:error, :invalid_protocol_result}
     end
   end
 
@@ -211,7 +220,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
          :request_timeout,
          :invalid_tool_return,
          :invalid_protocol_result,
-         :missing_structured_content
+         :missing_structured_content,
+         :tool_result_too_large
        ] do
       Events.log(%RuntimeError{message: inspect(reason)})
     end

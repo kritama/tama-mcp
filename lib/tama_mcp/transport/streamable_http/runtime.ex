@@ -12,6 +12,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     max_body_bytes: 1_048_576,
     body_read_timeout_ms: 5_000,
     request_timeout_ms: 30_000,
+    max_tool_result_bytes: 1_048_576,
     max_schema_bytes: 262_144,
     max_tools_per_server: 256,
     max_error_data_bytes: 8_192,

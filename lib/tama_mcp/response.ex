@@ -9,6 +9,8 @@ defmodule TamaMCP.Response do
   `TamaMCP.Error`.
   """
 
+  alias TamaMCP.JSON
+
   defstruct content: [],
             structured_content: nil,
             structured_content?: false,
@@ -127,8 +129,12 @@ defmodule TamaMCP.Response do
 
   defp valid_block?(%{"type" => type} = block) when is_binary(type) do
     case type do
-      "text" -> Map.has_key?(block, "text") and is_binary(Map.fetch!(block, "text"))
-      _ -> json_safe?(block)
+      "text" ->
+        Map.has_key?(block, "text") and is_binary(Map.fetch!(block, "text")) and
+          JSON.value?(block)
+
+      _other ->
+        JSON.value?(block)
     end
   end
 
@@ -137,12 +143,5 @@ defmodule TamaMCP.Response do
   defp validate_json_safe(_name, nil), do: :ok
 
   defp validate_json_safe(_name, value),
-    do: if(json_safe?(value), do: :ok, else: {:error, :non_json_safe})
-
-  defp json_safe?(value) do
-    case Jason.encode(value) do
-      {:ok, _} -> true
-      {:error, _} -> false
-    end
-  end
+    do: if(JSON.value?(value), do: :ok, else: {:error, :non_json_safe})
 end

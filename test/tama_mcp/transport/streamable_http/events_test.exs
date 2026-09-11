@@ -96,6 +96,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.EventsTest do
     refute Map.has_key?(Events.bound(%{server: "test"}, runtime), :secret)
   end
 
+  test "encodable structs from callback metadata are rejected" do
+    safe_metadata = fn _kind, _meta ->
+      %{adapter: %TamaMCP.TestSupport.Encodable{secret: "must-not-escape"}}
+    end
+
+    runtime = runtime(TamaMCP.TestSupport.Authorization, safe_metadata: safe_metadata)
+
+    assert %{server: "test"} == Events.bound(%{server: "test"}, runtime)
+  end
+
   @doc false
   def handle(name, measurements, metadata, test) do
     send(test, {:event, name, measurements, metadata})

@@ -1069,6 +1069,7 @@ The initial production defaults are:
 | `max_body_bytes` | `1_048_576` | maximum encoded UTF-8 request body |
 | `body_read_timeout_ms` | `5_000` | maximum time spent reading the request body |
 | `request_timeout_ms` | `30_000` | synchronous tool execution deadline |
+| `max_tool_result_bytes` | `1_048_576` | maximum encoded synchronous tool result |
 | `max_schema_bytes` | `262_144` | maximum canonical JSON size of each input or output schema |
 | `max_tools_per_server` | `256` | maximum registered tool definitions |
 | `default_task_ttl_ms` | `86_400_000` | default task lifetime of 24 hours |

@@ -9,6 +9,8 @@ defmodule TamaMCP.Error do
   not attach arbitrary terms (structs, exceptions, PIDs, references) to `data`.
   """
 
+  alias TamaMCP.JSON
+
   @enforce_keys [:code, :message]
   defstruct [:code, :message, data: nil]
 
@@ -154,10 +156,12 @@ defmodule TamaMCP.Error do
   defp safe_data(nil, _max_data_bytes), do: nil
 
   defp safe_data(data, max_data_bytes) do
-    case Jason.encode(data) do
-      {:ok, encoded} when byte_size(encoded) <= max_data_bytes -> data
-      {:error, _} -> nil
-      _too_large -> nil
+    with true <- is_map(data) and JSON.value?(data),
+         {:ok, encoded} <- Jason.encode(data),
+         true <- byte_size(encoded) <= max_data_bytes do
+      data
+    else
+      _unsafe_or_too_large -> nil
     end
   end
 

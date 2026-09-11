@@ -118,6 +118,32 @@ defmodule TamaMCP.ToolTest do
                }
              ]
     end
+
+    test "instance-valued schema keywords are not scanned for parameter annotations" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{
+          "route" => %{"type" => "string", "x-mcp-header" => "Route"},
+          "settings" => %{
+            "type" => "object",
+            "const" => %{"x-mcp-header" => "literal"},
+            "default" => %{"x-mcp-header" => "literal"},
+            "examples" => [%{"x-mcp-header" => "literal"}]
+          }
+        }
+      }
+
+      [{module, _bytecode}] = compile_raw_tool(schema)
+
+      assert module.parameter_headers() == [
+               %{
+                 header: "mcp-param-route",
+                 name: "Route",
+                 path: ["route"],
+                 type: "string"
+               }
+             ]
+    end
   end
 
   describe "rejected non-literal declarations" do
@@ -301,6 +327,15 @@ defmodule TamaMCP.ToolTest do
                   %{"type" => "string", "x-mcp-header" => "Hidden"}
                 ]
               }
+            }
+          },
+          ~r/not statically reachable/
+        },
+        {
+          %{
+            "type" => "object",
+            "$defs" => %{
+              "hidden" => %{"type" => "string", "x-mcp-header" => "Hidden"}
             }
           },
           ~r/not statically reachable/

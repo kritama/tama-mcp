@@ -3,6 +3,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Events do
 
   require Logger
 
+  alias TamaMCP.JSON
+
   @max_value_bytes 512
   @base_keys [:method, :reason, :server, :status, :tool]
 
@@ -33,7 +35,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Events do
       end
 
     merged = if is_map(extras), do: Map.merge(meta, extras), else: meta
-    if json_safe?(merged), do: merged, else: meta
+    if JSON.metadata?(merged), do: merged, else: meta
   end
 
   defp normalize_base(meta) do
@@ -56,8 +58,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Events do
       {:error, _reason} -> false
     end
   end
-
-  defp json_safe?(metadata), do: match?({:ok, _encoded}, Jason.encode(metadata))
 
   defp safe_value(value) when is_binary(value), do: truncate(value)
   defp safe_value(value) when is_atom(value), do: value

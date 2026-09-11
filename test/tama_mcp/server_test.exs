@@ -20,6 +20,7 @@ defmodule TamaMCP.ServerTest do
                "invalid_output",
                "null",
                "protocol_failing",
+               "result",
                "slow"
              ]
 
@@ -32,6 +33,7 @@ defmodule TamaMCP.ServerTest do
                %{name: "invalid_output", module: Tools.InvalidOutput},
                %{name: "null", module: Tools.Null},
                %{name: "protocol_failing", module: Tools.ProtocolFailing},
+               %{name: "result", module: Tools.Result},
                %{name: "slow", module: Tools.Slow}
              ]
     end

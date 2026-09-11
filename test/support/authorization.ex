@@ -22,6 +22,7 @@ defmodule TamaMCP.TestSupport.Authorization do
              "test.invalid_output",
              "test.null",
              "test.protocol_failing",
+             "test.result",
              "test.slow"
            ],
            owner_key: "test-owner",

@@ -11,3 +11,10 @@ defmodule TamaMCP.TestSupport.Fakes.PlainModule do
   # `{module, function}` callback.
   def metadata(_method, _meta), do: %{origin: :fake}
 end
+
+defmodule TamaMCP.TestSupport.Encodable do
+  @moduledoc false
+
+  @derive {Jason.Encoder, only: [:secret]}
+  defstruct [:secret]
+end

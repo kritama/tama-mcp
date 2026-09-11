@@ -158,6 +158,30 @@ defmodule TamaMCP.TestSupport.Tools.Null do
   end
 end
 
+defmodule TamaMCP.TestSupport.Tools.Result do
+  @moduledoc false
+
+  use TamaMCP.Tool, task: :disabled, scopes: ["test.result"]
+
+  input_schema do
+    field(:placement, {:enum, ["content", "structured_content", "meta"]}, required: true)
+    field(:value, :string, required: true)
+  end
+
+  @impl true
+  def call(%{"placement" => "content", "value" => value}, _context) do
+    {:ok, TamaMCP.Response.success(content: [TamaMCP.Response.text(value)])}
+  end
+
+  def call(%{"placement" => "structured_content", "value" => value}, _context) do
+    {:ok, TamaMCP.Response.success(structured_content: %{"value" => value})}
+  end
+
+  def call(%{"placement" => "meta", "value" => value}, _context) do
+    {:ok, TamaMCP.Response.success(meta: %{"test/value" => value})}
+  end
+end
+
 defmodule TamaMCP.TestSupport.Tools.Slow do
   @moduledoc false
 

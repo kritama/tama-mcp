@@ -3,6 +3,21 @@ defmodule TamaMCP.Tool.Headers do
 
   @allowed_types ~w(string integer boolean)
   @token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
+  @schema_keywords ~w(
+    additionalProperties
+    contains
+    contentSchema
+    else
+    if
+    items
+    not
+    propertyNames
+    then
+    unevaluatedItems
+    unevaluatedProperties
+  )
+  @schema_array_keywords ~w(allOf anyOf oneOf prefixItems)
+  @schema_map_keywords ~w($defs dependentSchemas patternProperties)
 
   @type descriptor :: %{
           header: String.t(),
@@ -93,10 +108,35 @@ defmodule TamaMCP.Tool.Headers do
   end
 
   defp other_values(schema, path) do
+    with {:ok, direct} <- collect(direct_schemas(schema), &scan(&1, path, false, false)),
+         {:ok, arrays} <- collect(array_schemas(schema), &scan(&1, path, false, false)),
+         {:ok, maps} <- collect(mapped_schemas(schema), &scan(&1, path, false, false)) do
+      {:ok, direct ++ arrays ++ maps}
+    end
+  end
+
+  defp direct_schemas(schema), do: values_for(schema, @schema_keywords)
+
+  defp array_schemas(schema) do
     schema
-    |> Map.drop(["properties", "x-mcp-header"])
-    |> Map.values()
-    |> collect(&scan(&1, path, false, false))
+    |> values_for(@schema_array_keywords)
+    |> Enum.flat_map(fn
+      values when is_list(values) -> values
+      _invalid -> []
+    end)
+  end
+
+  defp mapped_schemas(schema) do
+    schema
+    |> values_for(@schema_map_keywords)
+    |> Enum.flat_map(fn
+      values when is_map(values) -> Map.values(values)
+      _invalid -> []
+    end)
+  end
+
+  defp values_for(schema, keys) do
+    for key <- keys, Map.has_key?(schema, key), do: Map.fetch!(schema, key)
   end
 
   defp collect(values, fun) do

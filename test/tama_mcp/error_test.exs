@@ -14,6 +14,17 @@ defmodule TamaMCP.ErrorTest do
     refute Map.has_key?(TamaMCP.Error.encode(large, 16), "data")
   end
 
+  test "encoding rejects directly and recursively embedded encodable structs" do
+    struct = %TamaMCP.TestSupport.Encodable{secret: "must-not-escape"}
+    assert {:ok, _encoded} = Jason.encode(struct)
+
+    direct = %TamaMCP.Error{code: -32_603, message: "failure", data: struct}
+    nested = %{direct | data: %{"nested" => [struct]}}
+
+    refute Map.has_key?(TamaMCP.Error.encode(direct), "data")
+    refute Map.has_key?(TamaMCP.Error.encode(nested), "data")
+  end
+
   test "encoding normalizes malformed manually constructed messages" do
     error = %TamaMCP.Error{code: -32_603, message: nil}
     assert TamaMCP.Error.encode(error)["message"] == "Internal error"

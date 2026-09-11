@@ -14,5 +14,6 @@ defmodule TamaMCP.TestSupport.Server do
   tool(TamaMCP.TestSupport.Tools.InvalidOutput, name: "invalid_output")
   tool(TamaMCP.TestSupport.Tools.Null, name: "null")
   tool(TamaMCP.TestSupport.Tools.ProtocolFailing, name: "protocol_failing")
+  tool(TamaMCP.TestSupport.Tools.Result, name: "result")
   tool(TamaMCP.TestSupport.Tools.Slow, name: "slow")
 end

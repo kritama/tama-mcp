@@ -6,8 +6,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
   import Plug.Test
   import Elixir.Plug.Conn, only: [get_resp_header: 2]
 
-  alias TamaMCP.Protocol
-  alias TamaMCP.Transport.StreamableHTTP.Plug
+  alias TamaMCP.{Protocol, Response}
+  alias TamaMCP.TestSupport.Server
+  alias TamaMCP.Transport.StreamableHTTP.{Plug, Wire}
 
   @version Protocol.version()
   @parse Protocol.error_code(:parse)
@@ -67,6 +68,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
                "invalid_output",
                "null",
                "protocol_failing",
+               "result",
                "slow"
              ]
 
@@ -398,6 +400,62 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert log =~ "TamaMCP unexpected runtime failure: Elixir.RuntimeError"
     end
 
+    test "enforces the encoded tool result limit at the exact boundary" do
+      value = "fits"
+
+      result =
+        Response.success(content: [Response.text(value)])
+        |> Response.encode()
+        |> Wire.merge_meta(%{
+          Protocol.meta_key(:server_info) => %{
+            "name" => Server.name(),
+            "version" => Server.version()
+          }
+        })
+
+      size = result |> Jason.encode!() |> byte_size()
+
+      assert post(
+               result_runtime(size),
+               Protocol.method(:tools_call),
+               result_params("content", value),
+               headers: [{"mcp-name", "result"}]
+             ).status == 200
+
+      conn =
+        post(
+          result_runtime(size - 1),
+          Protocol.method(:tools_call),
+          result_params("content", value),
+          headers: [{"mcp-name", "result"}]
+        )
+
+      assert conn.status == 500
+      assert %{"error" => %{"code" => @internal}} = decode(conn)
+    end
+
+    test "rejects oversized content, structured content, and result metadata" do
+      value = String.duplicate("must-not-escape", 32)
+
+      for placement <- ["content", "structured_content", "meta"] do
+        {conn, log} =
+          with_log(fn ->
+            post(
+              result_runtime(128),
+              Protocol.method(:tools_call),
+              result_params(placement, value),
+              headers: [{"mcp-name", "result"}]
+            )
+          end)
+
+        assert conn.status == 500
+        assert %{"error" => %{"code" => @internal, "message" => "Internal error"}} = decode(conn)
+        refute conn.resp_body =~ value
+        refute log =~ value
+        refute log =~ "unexpected runtime failure"
+      end
+    end
+
     test "terminates synchronous execution at the configured request deadline" do
       runtime =
         Plug.init(
@@ -716,6 +774,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       },
       overrides
     )
+  end
+
+  defp result_runtime(maximum) do
+    Plug.init(
+      server: TamaMCP.TestSupport.Server,
+      authorization: TamaMCP.TestSupport.Authorization,
+      limits: [max_tool_result_bytes: maximum]
+    )
+  end
+
+  defp result_params(placement, value) do
+    %{"name" => "result", "arguments" => %{"placement" => placement, "value" => value}}
   end
 
   defp decode(%{resp_body: body}) do

@@ -24,6 +24,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.safe_metadata == nil
       assert runtime.context_headers == []
       assert runtime.limits.max_body_bytes == 1_048_576
+      assert runtime.limits.max_tool_result_bytes == 1_048_576
       assert runtime.limits.max_tools_per_server == 256
       assert runtime.limits.request_timeout_ms == 30_000
     end
