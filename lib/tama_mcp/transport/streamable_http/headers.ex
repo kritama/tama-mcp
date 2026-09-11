@@ -6,8 +6,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
   alias TamaMCP.Protocol
 
   @base64_sentinel ~r/\A=\?base64\?.*\?=\z/
+  @session_header "mcp-session-id"
 
   def validate_version(conn) do
+    with :ok <- reject_session(conn) do
+      validate_protocol_version(conn)
+    end
+  end
+
+  defp validate_protocol_version(conn) do
     version = Protocol.version()
 
     case get_req_header(conn, Protocol.header_key(:protocol_version)) do
@@ -15,6 +22,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
       [^version] -> :ok
       [value] -> {:error, TamaMCP.Error.unsupported_protocol_version(value)}
       _ -> {:error, mismatch(Protocol.header(:protocol_version) <> " must be a single value")}
+    end
+  end
+
+  defp reject_session(conn) do
+    case get_req_header(conn, @session_header) do
+      [] -> :ok
+      _values -> {:error, mismatch("Mcp-Session-Id is not supported")}
     end
   end
 

@@ -19,9 +19,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   end
 
   def server!(server) do
-    unless Code.ensure_loaded?(server) and
-             function_exported?(server, :tools, 0) and function_exported?(server, :name, 0) and
-             function_exported?(server, :version, 0) and function_exported?(server, :tool, 1) do
+    unless exports?(server, tools: 0, name: 0, version: 0, tool: 1, instructions: 0) do
       raise ArgumentError,
             "server: #{inspect(server)} is not a compiled TamaMCP server " <>
               "(define it with `use TamaMCP.Server`)"
@@ -29,8 +27,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   end
 
   def authorization!(authorization) do
-    unless Code.ensure_loaded?(authorization) and
-             function_exported?(authorization, :authenticate, 2) do
+    unless exports?(authorization, authenticate: 2) do
       raise ArgumentError,
             "authorization: #{inspect(authorization)} does not implement " <>
               "TamaMCP.Authorization (missing authenticate/2)"
@@ -58,7 +55,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   def metadata!(fun) when is_function(fun, 2), do: fun
 
   def metadata!({module, function}) when is_atom(module) and is_atom(function) do
-    if Code.ensure_loaded?(module) and function_exported?(module, function, 2) do
+    if exports?(module, [{function, 2}]) do
       &apply(module, function, [&1, &2])
     else
       raise ArgumentError,
@@ -150,6 +147,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     end)
   end
 
+  defp positive!(:max_safe_metadata_bytes, value) when is_integer(value) and value >= 2, do: value
+
+  defp positive!(:max_safe_metadata_bytes, value) do
+    raise ArgumentError,
+          "limit :max_safe_metadata_bytes must be an integer of at least 2, got: #{inspect(value)}"
+  end
+
   defp positive!(_key, value) when is_integer(value) and value > 0, do: value
 
   defp positive!(key, value) do
@@ -173,5 +177,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
       [] -> :ok
       duplicates -> raise ArgumentError, "duplicate #{label}: #{inspect(Enum.uniq(duplicates))}"
     end
+  end
+
+  defp exports?(module, exports) do
+    match?({:module, ^module}, Code.ensure_compiled(module)) and
+      Enum.all?(exports, fn {name, arity} -> function_exported?(module, name, arity) end)
   end
 end

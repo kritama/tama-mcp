@@ -18,9 +18,21 @@ defmodule TamaMCP.TestSupport.Authorization do
              "test.echo",
              "test.failing",
              "test.invalid",
+             "test.invalid_output",
              "test.protocol_failing",
              "test.slow"
            ],
+           owner_key: "test-owner",
+           expires_at: nil,
+           assigns: %{workspace: "test-workspace"}
+         }}
+
+      "echo-only" ->
+        {:ok,
+         %TamaMCP.Authorization.Decision{
+           principal: "test-principal",
+           claims: %{},
+           scopes: ["test.echo"],
            owner_key: "test-owner",
            expires_at: nil
          }}

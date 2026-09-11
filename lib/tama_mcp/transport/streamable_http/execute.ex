@@ -13,7 +13,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     with {:ok, name} <- name(request.params),
          {:ok, module} <- tool(runtime.server, name),
          meta = module.tool_metadata(),
-         :ok <- capabilities(meta, request.client_capabilities),
          {:ok, arguments} <- arguments(request.params),
          :ok <- scopes(meta.scopes, decision.scopes) do
       validate_and_run(conn, request, module, arguments, decision, runtime, base)
@@ -37,26 +36,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       module -> {:ok, module}
     end
   end
-
-  defp capabilities(%{task: :required}, client_capabilities) do
-    tasks = Protocol.tasks_extension()
-
-    case client_capabilities["extensions"] do
-      %{} = extensions when is_map_key(extensions, tasks) ->
-        :ok
-
-      _ ->
-        error =
-          Error.missing_required_client_capability(
-            %{"extensions" => %{tasks => %{}}},
-            "Server requires the #{tasks} extension for this request"
-          )
-
-        {:error, error, :missing_capability}
-    end
-  end
-
-  defp capabilities(_meta, _client_capabilities), do: :ok
 
   defp arguments(params) do
     cond do
@@ -88,15 +67,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   defp validate_and_run(conn, request, module, arguments, decision, runtime, base) do
     case Schema.validate(module.input_validator(), arguments) do
       :ok ->
-        :telemetry.execute(runtime.telemetry_prefix ++ [:tool, :validation], %{status: :ok}, base)
+        Events.emit(runtime, [:tool, :validation], %{status: :ok}, base)
         run(conn, request, module, arguments, decision, runtime, base)
 
       {:error, details} ->
-        :telemetry.execute(
-          runtime.telemetry_prefix ++ [:tool, :validation],
-          %{status: :invalid},
-          base
-        )
+        Events.emit(runtime, [:tool, :validation], %{status: :invalid}, base)
 
         message =
           details
@@ -166,11 +141,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
          :ok <- protocol_result(result) do
       reply = Wire.result(conn, 200, request.request_id, result, Map.put(base, :status, :ok))
 
-      :telemetry.execute(
-        runtime.telemetry_prefix ++ [:tool, :execution],
-        %{status: :ok},
-        elem(reply, 1)
-      )
+      Events.emit(runtime, [:tool, :execution], %{status: :ok}, elem(reply, 1))
 
       reply
     else
@@ -197,11 +168,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     reason = Error.reason(error)
     meta = Map.merge(base, %{status: :error, reason: reason})
 
-    :telemetry.execute(
-      runtime.telemetry_prefix ++ [:tool, :execution],
-      %{status: :error, reason: reason},
-      meta
-    )
+    Events.emit(runtime, [:tool, :execution], %{status: :error, reason: reason}, meta)
 
     Wire.error(conn, request.request_id, error, meta, runtime)
   end
@@ -246,8 +213,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
     meta = Map.merge(base, %{status: :error, reason: safe_reason(reason)})
 
-    :telemetry.execute(
-      runtime.telemetry_prefix ++ [:tool, :execution],
+    Events.emit(
+      runtime,
+      [:tool, :execution],
       %{status: :exception, reason: safe_reason(reason)},
       meta
     )
@@ -267,19 +235,36 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       owner_key: decision.owner_key,
       claims: decision.claims,
       scopes: decision.scopes,
-      headers: selected_headers(conn.req_headers, runtime.context_headers),
+      headers:
+        selected_headers(
+          conn.req_headers,
+          runtime.context_headers,
+          runtime.limits.max_safe_metadata_bytes
+        ),
       remote_address: remote_address(conn.remote_ip),
       task_id: nil,
-      assigns: %{}
+      assigns: decision.assigns
     }
   end
 
-  defp selected_headers(headers, names) do
-    Map.new(names, fn name ->
+  defp selected_headers(headers, names, limit) do
+    Enum.reduce(names, %{}, fn name, selected ->
       values = for {key, value} <- headers, String.downcase(key) == name, do: value
-      {name, if(length(values) == 1, do: hd(values), else: nil)}
+
+      case values do
+        [value] -> put_if_bounded(selected, name, value, limit)
+        _none_or_duplicate -> selected
+      end
     end)
-    |> Map.reject(fn {_name, value} -> is_nil(value) end)
+  end
+
+  defp put_if_bounded(headers, name, value, limit) do
+    candidate = Map.put(headers, name, value)
+
+    case Jason.encode(candidate) do
+      {:ok, encoded} when byte_size(encoded) <= limit -> candidate
+      _too_large_or_invalid -> headers
+    end
   end
 
   defp remote_address({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"

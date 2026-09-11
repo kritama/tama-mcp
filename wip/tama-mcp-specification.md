@@ -1,6 +1,6 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: implementation handoff
+Status: Phase 1 implemented; Phases 2-5 pending
 
 This document is the authoritative design contract for the first complete
 `tama_mcp` implementation. It defines the package boundary, supported protocol,
@@ -287,7 +287,8 @@ request-scoped data:
 - bounded request headers selected by the transport;
 - remote address supplied by the host application;
 - task identifier when executing as a durable task; and
-- application assigns supplied by configured adapters.
+- application assigns explicitly supplied by the configured authorization
+  adapter in its normalized decision.
 
 Context must survive transfer into asynchronous task execution. This is a
 security invariant: authorization claims, scopes, request identity, and the
@@ -1183,7 +1184,11 @@ and expired credentials.
 - compile-time server and tool DSL macros;
 - Draft 2020-12 schema compilation and validation;
 - stateless HTTP Plug, headers, JSON-RPC, and discovery; and
-- synchronous System MCP tools and contract tests.
+- synchronous tool execution and package-provided protocol contract tests.
+
+The concrete Tama System tool modules remain application-owned and migrate to
+this runtime in Phase 4. Phase 1 proves the reusable synchronous execution
+contract without introducing a dependency from TamaMCP back to Tama.
 
 ### Phase 2: durable Tasks extension
 

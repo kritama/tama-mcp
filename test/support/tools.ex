@@ -69,13 +69,18 @@ defmodule TamaMCP.TestSupport.Tools.Context do
   output_schema do
     field(:owner, :string, required: true)
     field(:trace, :string, required: true)
+    field(:workspace, :string, required: true)
   end
 
   @impl true
   def call(_input, context) do
     {:ok,
      TamaMCP.Response.success(
-       structured_content: %{"owner" => context.owner_key, "trace" => context.headers["x-trace"]},
+       structured_content: %{
+         "owner" => context.owner_key,
+         "trace" => context.headers["x-trace"] || "omitted",
+         "workspace" => context.assigns.workspace
+       },
        meta: %{
          TamaMCP.Protocol.meta_key(:server_info) => %{"name" => "spoofed", "version" => "0"}
        }
@@ -91,6 +96,21 @@ defmodule TamaMCP.TestSupport.Tools.Invalid do
   @impl true
   def call(_input, _context) do
     {:ok, TamaMCP.Response.success(content: [%{"type" => "made-up"}])}
+  end
+end
+
+defmodule TamaMCP.TestSupport.Tools.InvalidOutput do
+  @moduledoc false
+
+  use TamaMCP.Tool, task: :disabled, scopes: ["test.invalid_output"]
+
+  output_schema do
+    field(:status, :string, required: true)
+  end
+
+  @impl true
+  def call(_input, _context) do
+    {:ok, TamaMCP.Response.success(structured_content: %{"status" => 123})}
   end
 end
 

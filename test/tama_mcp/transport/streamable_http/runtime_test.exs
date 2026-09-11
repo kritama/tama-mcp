@@ -54,6 +54,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert is_function(runtime.safe_metadata, 2)
       assert runtime.safe_metadata.("x", %{}) == %{origin: :fake}
     end
+
+    test "accepts a direct safe_metadata callback" do
+      callback = fn _method, _meta -> %{safe: true} end
+      runtime = Runtime.build(@valid ++ [safe_metadata: callback])
+      assert runtime.safe_metadata.("x", %{}) == %{safe: true}
+    end
   end
 
   describe "module validation" do
@@ -92,12 +98,36 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(server: TamaMCP.TestSupport.Server, authorization: @plain)
       end
     end
+
+    test "rejects an unloaded authorization module" do
+      assert_raise ArgumentError, ~r/does not implement/, fn ->
+        Runtime.build(server: TamaMCP.TestSupport.Server, authorization: @unloaded)
+      end
+    end
   end
 
   describe "option validation" do
     test "rejects a non-keyword authorization_options" do
       assert_raise ArgumentError, ~r/authorization_options must be a keyword list/, fn ->
         Runtime.build(@valid ++ [authorization_options: "not-a-keyword"])
+      end
+    end
+
+    test "rejects non-keyword top-level options" do
+      assert_raise ArgumentError, ~r/options must be a keyword list/, fn ->
+        Runtime.build(%{server: TamaMCP.TestSupport.Server})
+      end
+    end
+
+    test "rejects invalid safe_metadata callbacks" do
+      assert_raise ArgumentError, ~r/safe_metadata/, fn ->
+        Runtime.build(@valid ++ [safe_metadata: :invalid])
+      end
+
+      assert_raise ArgumentError, ~r/not an exported function/, fn ->
+        Runtime.build(
+          @valid ++ [safe_metadata: {TamaMCP.TestSupport.Fakes.PlainModule, :missing}]
+        )
       end
     end
 
@@ -145,9 +175,33 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       end
     end
 
+    test "rejects malformed limit collections and values" do
+      assert_raise ArgumentError, ~r/keyword list or map/, fn ->
+        Runtime.build(@valid ++ [limits: [:not_a_pair]])
+      end
+
+      assert_raise ArgumentError, ~r/keyword list or map/, fn ->
+        Runtime.build(@valid ++ [limits: "invalid"])
+      end
+
+      assert_raise ArgumentError, ~r/positive integer/, fn ->
+        Runtime.build(@valid ++ [limits: [max_body_bytes: 0]])
+      end
+
+      assert_raise ArgumentError, ~r/at least 2/, fn ->
+        Runtime.build(@valid ++ [limits: [max_safe_metadata_bytes: 1]])
+      end
+    end
+
     test "rejects schemas that exceed the configured byte limit" do
       assert_raise ArgumentError, ~r/max_schema_bytes/, fn ->
         Runtime.build(@valid ++ [limits: [max_schema_bytes: 1]])
+      end
+    end
+
+    test "rejects catalogs that exceed the configured tool limit" do
+      assert_raise ArgumentError, ~r/max_tools_per_server/, fn ->
+        Runtime.build(@valid ++ [limits: [max_tools_per_server: 1]])
       end
     end
   end

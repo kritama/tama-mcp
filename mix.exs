@@ -18,6 +18,7 @@ defmodule TamaMCP.MixProject do
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
+      test_coverage: [ignore_modules: [~r/^TamaMCP\.TestSupport\./]],
       aliases: aliases()
     ]
   end
@@ -41,7 +42,8 @@ defmodule TamaMCP.MixProject do
 
   defp package do
     [
-      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE priv/protocol),
+      files:
+        ~w(lib test/fixtures/protocol/2026-07-28 .formatter.exs mix.exs README.md CHANGELOG.md LICENSE priv/protocol),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
     ]
@@ -81,7 +83,7 @@ defmodule TamaMCP.MixProject do
         "format --check-formatted",
         "compile --warnings-as-errors",
         "credo --strict",
-        "test"
+        "test --cover"
       ]
     ]
   end

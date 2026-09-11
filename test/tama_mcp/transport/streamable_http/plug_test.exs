@@ -2,6 +2,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
   @moduledoc false
 
   use ExUnit.Case
+  import ExUnit.CaptureLog
   import Plug.Test
   import Elixir.Plug.Conn, only: [get_resp_header: 2]
 
@@ -56,7 +57,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       %{"result" => result} = decode(conn)
 
       names = result["tools"] |> Enum.map(& &1["name"])
-      assert names == ["context", "echo", "failing", "invalid", "protocol_failing", "slow"]
+
+      assert names == [
+               "context",
+               "echo",
+               "failing",
+               "invalid",
+               "invalid_output",
+               "protocol_failing",
+               "slow"
+             ]
+
       assert result["resultType"] == Protocol.result_type(:complete)
       assert result["cacheScope"] == "private"
 
@@ -69,6 +80,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 400
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
+    end
+
+    test "returns only tools visible to the granted scopes", %{runtime: runtime} do
+      conn = post(runtime, Protocol.method(:tools_list), %{}, token: "echo-only")
+
+      assert conn.status == 200
+      assert [%{"name" => "echo"}] = decode(conn)["result"]["tools"]
     end
   end
 
@@ -136,6 +154,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
     end
 
+    test "rejects unsupported continuation fields and non-object arguments", %{runtime: runtime} do
+      requests = [
+        %{"name" => "echo", "inputResponses" => []},
+        %{"name" => "echo", "requestState" => "state"},
+        %{"name" => "echo", "arguments" => []}
+      ]
+
+      for params <- requests do
+        conn =
+          post(runtime, Protocol.method(:tools_call), params, headers: [{"mcp-name", "echo"}])
+
+        assert conn.status == 400
+        assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
+      end
+    end
+
     test "rejects an unknown tool", %{runtime: runtime} do
       conn =
         post(runtime, Protocol.method(:tools_call), %{"name" => "nope", "arguments" => %{}},
@@ -192,7 +226,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 200
       result = decode(conn)["result"]
-      assert result["structuredContent"] == %{"owner" => "test-owner", "trace" => "trace-1"}
+
+      assert result["structuredContent"] == %{
+               "owner" => "test-owner",
+               "trace" => "trace-1",
+               "workspace" => "test-workspace"
+             }
 
       assert result["_meta"][Protocol.meta_key(:server_info)] == %{
                "name" => "tama-mcp-test",
@@ -210,6 +249,21 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 500
       assert %{"error" => %{"code" => @internal}} = decode(conn)
+    end
+
+    test "rejects structured content that violates the declared output schema", %{
+      runtime: runtime
+    } do
+      {conn, log} =
+        with_log(fn ->
+          post(runtime, Protocol.method(:tools_call), %{"name" => "invalid_output"},
+            headers: [{"mcp-name", "invalid_output"}]
+          )
+        end)
+
+      assert conn.status == 500
+      assert %{"error" => %{"code" => @internal}} = decode(conn)
+      assert log =~ "TamaMCP unexpected runtime failure: Elixir.RuntimeError"
     end
 
     test "terminates synchronous execution at the configured request deadline" do
@@ -235,7 +289,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       conn =
         :get
         |> conn("/", "")
-        |> set_headers([{"mcp-protocol-version", @version}])
+        |> set_headers([{"mcp-protocol-version", @version}, {"x-test-token", "ok"}])
         |> Plug.call(runtime)
 
       assert conn.status == 405
@@ -251,7 +305,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         ])
 
       assert conn.status == 400
-      assert %{"error" => %{"code" => @parse}} = decode(conn)
+      response = decode(conn)
+      assert %{"error" => %{"code" => @parse}} = response
+      refute Map.has_key?(response, "id")
     end
 
     test "rejects media types with a query suffix", %{runtime: runtime} do
@@ -334,6 +390,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"error" => %{"code" => @unsupported}} = decode(conn)
     end
 
+    test "rejects Mcp-Session-Id instead of accepting protocol sessions", %{runtime: runtime} do
+      conn =
+        post(runtime, Protocol.method(:server_discover), %{},
+          headers: [{"mcp-session-id", "legacy-session"}]
+        )
+
+      assert conn.status == 400
+      assert %{"error" => %{"code" => @header_mismatch, "message" => message}} = decode(conn)
+      assert message =~ "Mcp-Session-Id is not supported"
+    end
+
     test "rejects a Mcp-Method header that disagrees with the body", %{runtime: runtime} do
       method = Protocol.method(:server_discover)
       params = %{"_meta" => base_meta()}
@@ -385,11 +452,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
     end
 
-    test "answers 404 for methods this phase does not implement", %{runtime: runtime} do
-      conn = post(runtime, "tasks/get", %{"taskId" => "t-1"}, headers: [{"mcp-name", "t-1"}])
+    test "rejects legacy and future-phase methods", %{runtime: runtime} do
+      requests = [
+        {"initialize", %{}, []},
+        {"notifications/initialized", %{}, []},
+        {"tasks/result", %{}, []},
+        {"tasks/list", %{}, []},
+        {"tasks/get", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
+        {"tasks/update", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
+        {"tasks/cancel", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
+        {"subscriptions/listen", %{}, []}
+      ]
 
-      assert conn.status == 404
-      assert %{"error" => %{"code" => @method_not_found}} = decode(conn)
+      for {method, params, headers} <- requests do
+        conn = post(runtime, method, params, headers: headers)
+        assert conn.status == 404
+        assert %{"error" => %{"code" => @method_not_found}} = decode(conn)
+      end
     end
 
     test "fails closed when authorization rejects the request", %{runtime: runtime} do
@@ -398,6 +477,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 401
       assert %{"error" => %{"code" => @invalid_request}} = decode(conn)
+    end
+
+    test "bounds selected context headers using the configured metadata limit" do
+      runtime =
+        Plug.init(
+          server: TamaMCP.TestSupport.Server,
+          authorization: TamaMCP.TestSupport.Authorization,
+          context_headers: ["X-Trace"],
+          limits: [max_safe_metadata_bytes: 64]
+        )
+
+      conn =
+        post(runtime, Protocol.method(:tools_call), %{"name" => "context"},
+          headers: [{"mcp-name", "context"}, {"x-trace", String.duplicate("x", 128)}]
+        )
+
+      assert conn.status == 200
+      assert decode(conn)["result"]["structuredContent"]["trace"] == "omitted"
     end
   end
 
@@ -428,6 +525,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
   end
 
   defp raw_post(runtime, body, headers) do
+    headers =
+      if Enum.any?(headers, fn {name, _value} -> String.downcase(name) == "x-test-token" end),
+        do: headers,
+        else: [{"x-test-token", "ok"} | headers]
+
     :post
     |> conn("/", body)
     |> set_headers(headers)

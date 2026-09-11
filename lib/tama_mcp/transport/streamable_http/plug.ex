@@ -8,6 +8,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
 
   import Plug.Conn
 
+  alias TamaMCP.Authorization.Decision
   alias TamaMCP.Transport.StreamableHTTP.{Body, Dispatch, Events, Request, Runtime, Wire}
 
   @spec init(keyword()) :: Runtime.t()
@@ -17,28 +18,57 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
   def call(%Plug.Conn{} = conn, %Runtime{} = runtime) do
     base = %{server: runtime.server.name()}
     started = System.monotonic_time()
-    prefix = runtime.telemetry_prefix
-    :telemetry.execute(prefix ++ [:request, :start], %{}, base)
+    Events.emit(runtime, [:request, :start], %{}, base)
 
     {conn, meta} =
       try do
         handle(conn, runtime, base)
       rescue
-        exception -> unexpected(conn, runtime, base, exception)
+        exception ->
+          meta = Map.merge(base, %{status: :exception, reason: Events.exception(exception)})
+          Events.emit(runtime, [:request, :exception], %{}, meta)
+          unexpected(conn, runtime, base, exception)
       end
 
-    :telemetry.execute(
-      prefix ++ [:request, :stop],
-      %{system_time: System.monotonic_time() - started},
-      Events.bound(meta, runtime)
+    Events.emit(
+      runtime,
+      [:request, :stop],
+      %{duration: System.monotonic_time() - started},
+      meta
     )
 
     conn
   end
 
   defp handle(conn, runtime, base) do
+    case runtime.authorization.authenticate(conn, runtime.authorization_options) do
+      {:ok, %Decision{} = decision} ->
+        authorized(conn, decision, runtime, base)
+
+      {:error, %TamaMCP.Error{} = error} ->
+        authorization_error(conn, error, runtime, base)
+
+      _invalid ->
+        meta = Map.merge(base, %{status: :exception, reason: :invalid_authorization_return})
+        Events.emit(runtime, [:authorization, :failure], %{}, meta)
+        unexpected(conn, runtime, base, %RuntimeError{message: "invalid authorization return"})
+    end
+  end
+
+  defp authorized(conn, decision, runtime, base) do
+    if Decision.valid?(decision) do
+      Events.emit(runtime, [:authorization, :success], %{}, base)
+      route(conn, decision, runtime, base)
+    else
+      meta = Map.merge(base, %{status: :exception, reason: :invalid_authorization_decision})
+      Events.emit(runtime, [:authorization, :failure], %{}, meta)
+      unexpected(conn, runtime, base, %RuntimeError{message: "invalid authorization decision"})
+    end
+  end
+
+  defp route(conn, decision, runtime, base) do
     if String.downcase(conn.method) == "post" do
-      post(conn, runtime, base)
+      post(conn, decision, runtime, base)
     else
       conn
       |> put_resp_header("allow", "POST")
@@ -47,12 +77,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     end
   end
 
-  defp post(conn, runtime, base) do
+  defp post(conn, decision, runtime, base) do
     with :ok <- Body.validate(conn),
          {:ok, conn} <- Request.validate_headers(conn),
          {:ok, body, conn} <- Body.read(conn, runtime.limits),
          {:ok, request, conn} <- Request.validate(conn, body) do
-      authenticate(conn, request, runtime, base)
+      Dispatch.call(conn, request, decision, runtime, base)
     else
       {:error, %TamaMCP.Error{} = error} ->
         reject(conn, nil, error, TamaMCP.Error.reason(error), runtime, base)
@@ -98,24 +128,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     end
   end
 
-  defp authenticate(conn, request, runtime, base) do
-    case runtime.authorization.authenticate(conn, runtime.authorization_options) do
-      {:ok, %TamaMCP.Authorization.Decision{} = decision} ->
-        :telemetry.execute(runtime.telemetry_prefix ++ [:authorization, :success], %{}, base)
-        Dispatch.call(conn, request, decision, runtime, base)
+  defp authorization_error(conn, error, runtime, base) do
+    meta = Map.merge(base, %{status: :unauthorized, reason: :authorization_rejected})
+    Events.emit(runtime, [:authorization, :failure], %{}, meta)
 
-      {:error, %TamaMCP.Error{} = error} ->
-        meta = Map.merge(base, %{status: :unauthorized, reason: :authorization_rejected})
-        :telemetry.execute(runtime.telemetry_prefix ++ [:authorization, :failure], %{}, meta)
-
-        Wire.error(conn, request.request_id, error, meta, runtime,
-          status: 401,
-          authenticate: :credential
-        )
-
-      _invalid ->
-        unexpected(conn, runtime, base, %RuntimeError{message: "invalid authorization return"})
-    end
+    Wire.error(conn, nil, error, meta, runtime,
+      status: 401,
+      authenticate: :credential
+    )
   end
 
   defp reject(conn, id, error, reason, runtime, base, status \\ nil) do

@@ -16,6 +16,7 @@ defmodule TamaMCP.ServerTest do
                "echo",
                "failing",
                "invalid",
+               "invalid_output",
                "protocol_failing",
                "slow"
              ]
@@ -25,6 +26,7 @@ defmodule TamaMCP.ServerTest do
                %{name: "echo", module: Tools.Echo},
                %{name: "failing", module: Tools.Failing},
                %{name: "invalid", module: Tools.Invalid},
+               %{name: "invalid_output", module: Tools.InvalidOutput},
                %{name: "protocol_failing", module: Tools.ProtocolFailing},
                %{name: "slow", module: Tools.Slow}
              ]
@@ -38,6 +40,32 @@ defmodule TamaMCP.ServerTest do
   end
 
   describe "tool/2 compile-time contract (negative)" do
+    test "missing and malformed server identity fails at compile time" do
+      assert_raise CompileError, ~r/server name is required/, fn ->
+        Code.compile_string(~S"""
+        defmodule TamaMCP.ServerTest.NoName do
+          use TamaMCP.Server, version: "1"
+        end
+        """)
+      end
+
+      assert_raise CompileError, ~r/server version is required/, fn ->
+        Code.compile_string(~S"""
+        defmodule TamaMCP.ServerTest.NoVersion do
+          use TamaMCP.Server, name: "x"
+        end
+        """)
+      end
+
+      assert_raise CompileError, ~r/server instructions/, fn ->
+        Code.compile_string(~S"""
+        defmodule TamaMCP.ServerTest.BadInstructions do
+          use TamaMCP.Server, name: "x", version: "1", instructions: 1
+        end
+        """)
+      end
+    end
+
     test "unknown and duplicate server options fail at compile time" do
       assert_raise CompileError, ~r/unknown server options/, fn ->
         Code.compile_string(~S"""
