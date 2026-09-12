@@ -24,6 +24,13 @@ defmodule TamaMCP.JSON do
 
   def meta_key?(_key), do: false
 
+  @spec extension_identifier?(term()) :: boolean()
+  def extension_identifier?(key) when is_binary(key) do
+    String.valid?(key) and prefixed_meta_key?(String.split(key, "/"))
+  end
+
+  def extension_identifier?(_key), do: false
+
   defp safe?(nil, _kind), do: true
   defp safe?(value, _kind) when is_boolean(value) or is_number(value), do: true
   defp safe?(value, _kind) when is_binary(value), do: String.valid?(value)
@@ -45,10 +52,16 @@ defmodule TamaMCP.JSON do
   defp valid_meta_key?([name]), do: Regex.match?(@meta_name, name)
 
   defp valid_meta_key?([prefix, name]) do
-    valid_meta_prefix?(prefix) and Regex.match?(@meta_name, name)
+    prefixed_meta_key?([prefix, name])
   end
 
   defp valid_meta_key?(_segments), do: false
+
+  defp prefixed_meta_key?([prefix, name]) do
+    valid_meta_prefix?(prefix) and Regex.match?(@meta_name, name)
+  end
+
+  defp prefixed_meta_key?(_segments), do: false
 
   defp valid_meta_prefix?(prefix) do
     prefix

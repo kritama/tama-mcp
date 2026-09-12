@@ -90,10 +90,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
   defp jsonrpc(%{"jsonrpc" => "2.0"}), do: :ok
   defp jsonrpc(_json), do: {:error, TamaMCP.Error.invalid_request("jsonrpc must be \"2.0\"")}
 
-  defp method(%{"method" => method}) when is_binary(method) and method != "", do: {:ok, method}
+  defp method(%{"method" => method}) when is_binary(method), do: {:ok, method}
 
   defp method(_json),
-    do: {:error, TamaMCP.Error.invalid_request("method must be a non-empty string")}
+    do: {:error, TamaMCP.Error.invalid_request("method must be a string")}
 
   defp valid_id(id) when is_integer(id), do: {:ok, id}
   defp valid_id(id) when is_binary(id), do: {:ok, id}
@@ -139,9 +139,36 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     key = Protocol.meta_key(:client_capabilities)
 
     case meta[key] do
-      capabilities when is_map(capabilities) -> {:ok, capabilities}
+      capabilities when is_map(capabilities) -> validate_capabilities(capabilities, key)
       _ -> {:error, TamaMCP.Error.invalid_params("params._meta.#{key} is required")}
     end
+  end
+
+  defp validate_capabilities(capabilities, key) do
+    case Map.fetch(capabilities, "extensions") do
+      :error ->
+        {:ok, capabilities}
+
+      {:ok, extensions} when is_map(extensions) ->
+        if Enum.all?(extensions, &valid_extension?/1) do
+          {:ok, capabilities}
+        else
+          {:error, invalid_extensions(key)}
+        end
+
+      {:ok, _extensions} ->
+        {:error, invalid_extensions(key)}
+    end
+  end
+
+  defp valid_extension?({identifier, settings}) do
+    JSON.extension_identifier?(identifier) and is_map(settings)
+  end
+
+  defp invalid_extensions(key) do
+    TamaMCP.Error.invalid_params(
+      "params._meta.#{key}.extensions must use prefixed identifiers with object values"
+    )
   end
 
   defp client_info(meta) do
@@ -152,14 +179,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
         {:ok, nil}
 
       {:ok, %{"name" => name, "version" => version} = info}
-      when is_binary(name) and name != "" and is_binary(version) and version != "" ->
+      when is_binary(name) and is_binary(version) ->
         {:ok, info}
 
       {:ok, _info} ->
         {:error,
-         TamaMCP.Error.invalid_params(
-           "params._meta.#{key} must have non-empty name and version strings"
-         )}
+         TamaMCP.Error.invalid_params("params._meta.#{key} must have name and version strings")}
     end
   end
 

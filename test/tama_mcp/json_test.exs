@@ -36,4 +36,12 @@ defmodule TamaMCP.JSONTest do
       refute JSON.meta_object?(%{key => true})
     end
   end
+
+  test "extension identifiers require a metadata prefix" do
+    assert JSON.extension_identifier?("io.modelcontextprotocol/tasks")
+    assert JSON.extension_identifier?("com.example/feature")
+
+    refute JSON.extension_identifier?("tasks")
+    refute JSON.extension_identifier?("bad key")
+  end
 end

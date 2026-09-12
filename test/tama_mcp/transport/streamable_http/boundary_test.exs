@@ -144,7 +144,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
         "method" => "server/discover",
         "params" => params()
       }),
-      encode(%{"jsonrpc" => "2.0", "id" => 1, "method" => "", "params" => params()}),
+      encode(%{"jsonrpc" => "2.0", "id" => 1, "method" => 1, "params" => params()}),
       encode(%{
         "jsonrpc" => "2.0",
         "id" => nil,
@@ -174,7 +174,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
     invalid_info =
       envelope(
         method,
-        params(%{Protocol.meta_key(:client_info) => %{"name" => "", "version" => "1"}})
+        params(%{Protocol.meta_key(:client_info) => %{"name" => 1, "version" => "1"}})
       )
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
@@ -182,6 +182,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
              Request.validate(valid_conn, encode(invalid_info), TamaMCP.TestSupport.Server)
+  end
+
+  test "request parsing accepts empty client information strings" do
+    method = Protocol.method(:server_discover)
+    valid_conn = conn([{"mcp-method", method}])
+    info = %{"name" => "", "version" => ""}
+    request = envelope(method, params(%{Protocol.meta_key(:client_info) => info}))
+
+    assert {:ok, %Request{client_info: ^info}, _conn} =
+             Request.validate(valid_conn, encode(request), TamaMCP.TestSupport.Server)
   end
 
   test "request parsing rejects invalid protocol metadata key names" do

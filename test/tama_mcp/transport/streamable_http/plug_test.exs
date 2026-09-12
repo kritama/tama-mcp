@@ -709,8 +709,29 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
     end
 
+    test "validates extension capability identifiers", %{runtime: runtime} do
+      valid = %{"extensions" => %{"com.example/feature" => %{}}}
+
+      assert post(runtime, Protocol.method(:server_discover), %{},
+               meta: %{Protocol.meta_key(:client_capabilities) => valid}
+             ).status == 200
+
+      for identifier <- ["tasks", "bad key"] do
+        capabilities = %{"extensions" => %{identifier => %{}}}
+
+        conn =
+          post(runtime, Protocol.method(:server_discover), %{},
+            meta: %{Protocol.meta_key(:client_capabilities) => capabilities}
+          )
+
+        assert conn.status == 400
+        assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
+      end
+    end
+
     test "rejects legacy and future-phase methods", %{runtime: runtime} do
       requests = [
+        {"", %{}, []},
         {"initialize", %{}, []},
         {"notifications/initialized", %{}, []},
         {"tasks/result", %{}, []},
