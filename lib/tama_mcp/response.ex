@@ -128,17 +128,27 @@ defmodule TamaMCP.Response do
   defp validate_content(_), do: {:error, :invalid_content_block}
 
   defp valid_block?(%{"type" => type} = block) when is_binary(type) do
-    case type do
-      "text" ->
-        Map.has_key?(block, "text") and is_binary(Map.fetch!(block, "text")) and
-          JSON.value?(block)
-
-      _other ->
-        JSON.value?(block)
-    end
+    valid_block_shape?(type, block) and JSON.value?(block) and valid_meta?(block) and
+      valid_embedded_resource_meta?(type, block)
   end
 
   defp valid_block?(_), do: false
+
+  defp valid_block_shape?("text", %{"text" => text}), do: is_binary(text)
+  defp valid_block_shape?(_type, _block), do: true
+
+  defp valid_meta?(map) do
+    case Map.fetch(map, "_meta") do
+      :error -> true
+      {:ok, meta} -> JSON.meta_object?(meta)
+    end
+  end
+
+  defp valid_embedded_resource_meta?("resource", %{"resource" => resource})
+       when is_map(resource),
+       do: valid_meta?(resource)
+
+  defp valid_embedded_resource_meta?(_type, _block), do: true
 
   defp validate_json_safe(_name, nil), do: :ok
 

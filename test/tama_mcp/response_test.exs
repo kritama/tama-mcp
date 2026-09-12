@@ -82,4 +82,44 @@ defmodule TamaMCP.ResponseTest do
     assert {:error, :invalid_metadata} =
              Response.validate(Response.success(meta: "not-an-object"))
   end
+
+  test "validation enforces metadata key grammar on every content block type" do
+    invalid_meta = %{"bad key" => true}
+
+    blocks = [
+      %{"type" => "text", "text" => "ok"},
+      %{"type" => "image", "data" => "aW1hZ2U=", "mimeType" => "image/png"},
+      %{"type" => "audio", "data" => "YXVkaW8=", "mimeType" => "audio/mpeg"},
+      %{"type" => "resource_link", "name" => "example", "uri" => "file:///example"},
+      %{
+        "type" => "resource",
+        "resource" => %{"uri" => "file:///example", "text" => "contents"}
+      }
+    ]
+
+    Enum.each(blocks, fn block ->
+      response = Response.success(content: [Map.put(block, "_meta", invalid_meta)])
+      assert {:error, :invalid_content_block} = Response.validate(response)
+    end)
+  end
+
+  test "validation enforces metadata key grammar inside embedded resources" do
+    invalid = %{
+      "type" => "resource",
+      "resource" => %{
+        "uri" => "file:///example",
+        "text" => "contents",
+        "_meta" => %{"bad key" => true}
+      }
+    }
+
+    valid =
+      put_in(invalid, ["resource", "_meta"], %{"example/resource" => true})
+      |> Map.put("_meta", %{"example/block" => true})
+
+    assert {:error, :invalid_content_block} =
+             Response.validate(Response.success(content: [invalid]))
+
+    assert :ok = Response.validate(Response.success(content: [valid]))
+  end
 end
