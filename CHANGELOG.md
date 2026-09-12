@@ -37,4 +37,5 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Tie synchronous tool workers to their request lifetime and execution deadline.
 - Combine repeated list-valued `Accept` fields while retaining strict handling
   for single-valued transport headers.
-- Reject unsafe `Mcp-Method` header characters before header/body comparison.
+- Reject unsafe `MCP-Protocol-Version` and `Mcp-Method` header characters before
+  version negotiation or header/body comparison.

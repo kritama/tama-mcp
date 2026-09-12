@@ -82,6 +82,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
              )
   end
 
+  test "protocol version headers reject unsafe characters before version negotiation" do
+    for version <- ["método", "bad\x01version"] do
+      assert {:error, %TamaMCP.Error{code: -32_020}} =
+               Headers.validate_version(conn([{"mcp-protocol-version", version}]))
+    end
+  end
+
   test "method headers reject unsafe characters before body comparison" do
     for method <- ["método", "bad\x01method"] do
       request = request(method, %{})

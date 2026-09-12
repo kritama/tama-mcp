@@ -635,6 +635,31 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"error" => %{"code" => @unsupported}} = decode(conn)
     end
 
+    test "rejects malformed protocol versions as header mismatches", %{runtime: runtime} do
+      params = %{"_meta" => base_meta()}
+
+      for version <- ["método", "bad\x01version"] do
+        conn =
+          raw_post(
+            runtime,
+            Jason.encode!(envelope(Protocol.method(:server_discover), params)),
+            [
+              {"mcp-protocol-version", version},
+              {"mcp-method", Protocol.method(:server_discover)},
+              {"content-type", "application/json"},
+              {"accept", "application/json, text/event-stream"}
+            ]
+          )
+
+        assert conn.status == 400
+
+        assert %{"error" => %{"code" => @header_mismatch, "message" => message}} =
+                 decode(conn)
+
+        assert message =~ "MCP-Protocol-Version header is malformed"
+      end
+    end
+
     test "rejects Mcp-Session-Id instead of accepting protocol sessions", %{runtime: runtime} do
       conn =
         post(runtime, Protocol.method(:server_discover), %{},

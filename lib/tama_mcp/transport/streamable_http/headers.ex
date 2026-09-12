@@ -19,9 +19,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
 
     case get_req_header(conn, Protocol.header_key(:protocol_version)) do
       [] -> {:error, mismatch(Protocol.header(:protocol_version) <> " header is required")}
-      [^version] -> :ok
-      [value] -> {:error, TamaMCP.Error.unsupported_protocol_version(value)}
+      [value] -> compare_version(value, version)
       _ -> {:error, mismatch(Protocol.header(:protocol_version) <> " must be a single value")}
+    end
+  end
+
+  defp compare_version(value, expected) do
+    case valid_plain(value) do
+      {:ok, ^expected} ->
+        :ok
+
+      {:ok, valid} ->
+        {:error, TamaMCP.Error.unsupported_protocol_version(valid)}
+
+      {:error, reason} ->
+        {:error,
+         mismatch(Protocol.header(:protocol_version) <> " header is malformed: " <> reason)}
     end
   end
 
