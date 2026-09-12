@@ -31,10 +31,12 @@ Codex / OpenCode / Pi
 ```
 
 - `TamaMCP` owns MCP JSON-RPC validation, the server/tool DSL, stateless HTTP,
-  protocol responses, and the future Tasks and subscription adapter contracts.
+  protocol responses, cache keys and compiled validator artifacts, and the
+  future Tasks and subscription adapter contracts.
 - `TamaOAuth` owns reusable OAuth and protected-resource protocol mechanics.
-- Tama owns identities, authorization policy, rate limits, Ecto persistence,
-  durable execution, task transitions, and graph results.
+- Tama owns identities, authorization policy, rate limits, the tool-validator
+  cache engine, Ecto persistence, durable execution, task transitions, and
+  graph results.
 - Tama Link owns client compatibility, OAuth client behavior, local
   correlation, polling recovery, and downstream progress presentation.
 
@@ -89,20 +91,29 @@ defmodule Example.Server do
 end
 ```
 
-Mount the transport with an authorization adapter:
+Mount the transport with authorization and cache adapters:
 
 ```elixir
 forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
   server: Example.Server,
   authorization: Example.Authorization,
+  cache: Example.Cache,
   context_headers: ["x-request-id"]
 ```
 
-The adapter implements the `c:TamaMCP.Authorization.authenticate/2` callback and
-returns a `TamaMCP.Authorization.Decision`. The decision carries the
+The authorization adapter implements the
+`c:TamaMCP.Authorization.authenticate/2` callback and returns a
+`TamaMCP.Authorization.Decision`. The decision carries the
 authenticated principal, owner key, claims, granted scopes, credential expiry,
 and explicit application assigns. Authentication runs once before transport
 validation on every HTTP request.
+
+The cache adapter implements `TamaMCP.Cache`. TamaMCP compiles tool validators
+while compiling each tool module, embeds their serialized artifacts, and owns
+versioned cache keys and restoration. The host adapter owns storage,
+concurrency, expiry, distribution, and any additional serialization required by
+its cache engine. Cached validator values are opaque Erlang terms and may
+contain functions.
 
 ## Conformance
 
@@ -126,7 +137,7 @@ fixture set.
 - `telemetry` exposes bounded runtime instrumentation.
 
 The library deliberately does not depend on Phoenix, Ecto, Bandit, Cowboy,
-Anubis MCP, or ex_mcp.
+Anubis MCP, ex_mcp, or a tool-validator cache engine.
 
 ## Installation
 

@@ -11,15 +11,60 @@ defmodule TamaMCP.ToolTest.SideEffects do
   end
 end
 
+defmodule TamaMCP.ToolTest.Cache do
+  @moduledoc false
+
+  @behaviour TamaMCP.Cache
+
+  @impl true
+  def fetch(_key, _loader, result: result), do: result
+
+  def fetch(key, loader, options) do
+    send(Keyword.fetch!(options, :test), {:validator_cache_fetch, key})
+    {:ok, loader.()}
+  end
+end
+
 defmodule TamaMCP.ToolTest do
   @moduledoc false
 
+  alias TamaMCP.TestSupport.Cache
   alias TamaMCP.TestSupport.Tools.Headers
   alias TamaMCP.ToolTest.SideEffects
 
   use ExUnit.Case
 
   describe "accepted literal declarations" do
+    test "compiled validators are restored through the host cache adapter" do
+      validator =
+        TamaMCP.Tool.input_validator(
+          TamaMCP.TestSupport.Tools.Echo,
+          TamaMCP.ToolTest.Cache,
+          test: self()
+        )
+
+      assert_receive {:validator_cache_fetch, "tama_mcp:validator:1:" <> _fingerprinted_key}
+      assert :ok = TamaMCP.Schema.validate(validator, %{"message" => "hello"})
+    end
+
+    test "cache adapter failures remain bounded" do
+      fetch = fn result ->
+        TamaMCP.Tool.input_validator(
+          TamaMCP.TestSupport.Tools.Echo,
+          TamaMCP.ToolTest.Cache,
+          result: result
+        )
+      end
+
+      assert_raise TamaMCP.Schema.Error, "validator cache failed", fn ->
+        fetch.({:error, %{secret: "must not leak"}})
+      end
+
+      assert_raise TamaMCP.Schema.Error, "validator cache returned an invalid result", fn ->
+        fetch.(:unexpected)
+      end
+    end
+
     test "atom names, primitive types, tuple types, and keyword options build a schema" do
       modules =
         Code.compile_string(
@@ -96,7 +141,9 @@ defmodule TamaMCP.ToolTest do
       {mod, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.RawTool, 0)
       assert mod.input_schema()["properties"]["x"]["type"] == "integer"
       assert mod.output_schema() == %{}
-      assert :ok = TamaMCP.Schema.validate(TamaMCP.Tool.output_validator(mod), %{"ok" => true})
+
+      assert :ok =
+               TamaMCP.Schema.validate(TamaMCP.Tool.output_validator(mod, Cache), %{"ok" => true})
     end
 
     test "raw input schemas compile statically reachable parameter headers" do
@@ -383,13 +430,21 @@ defmodule TamaMCP.ToolTest do
     on_exit(fn -> Code.compiler_options(original) end)
 
     compile_reloadable(module, ":string")
-    assert :ok = TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module), %{"value" => "ok"})
+
+    assert :ok =
+             TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module, Cache), %{
+               "value" => "ok"
+             })
 
     compile_reloadable(module, ":integer")
-    assert :ok = TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module), %{"value" => 1})
+
+    assert :ok =
+             TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module, Cache), %{"value" => 1})
 
     assert {:error, _details} =
-             TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module), %{"value" => "stale"})
+             TamaMCP.Schema.validate(TamaMCP.Tool.input_validator(module, Cache), %{
+               "value" => "stale"
+             })
   end
 
   test "schema builder raises the nested error module" do

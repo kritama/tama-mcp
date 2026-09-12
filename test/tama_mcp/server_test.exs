@@ -124,8 +124,8 @@ defmodule TamaMCP.ServerTest do
           def tool_metadata, do: %{name: "partial"}
           def task_policy, do: :disabled
           def definition, do: %{"inputSchema" => %{}}
-          def input_validator, do: nil
-          def output_validator, do: nil
+          def input_validator(_cache, _options), do: nil
+          def output_validator(_cache, _options), do: nil
         end
         """,
         "server_test_partial_tool.exs"

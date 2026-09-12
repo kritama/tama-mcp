@@ -140,9 +140,9 @@ Tama authorization, durable task rows, PubSub, graph execution
 
 | Component | Owns |
 | --- | --- |
-| TamaMCP | MCP wire protocol, JSON-RPC, schemas, DSL, request context, task protocol state, subscription streams, adapter behaviours |
+| TamaMCP | MCP wire protocol, JSON-RPC, schemas, DSL, validator artifacts and cache keys, request context, task protocol state, subscription streams, adapter behaviours |
 | TamaOAuth | OAuth and protected-resource protocol mechanics |
-| Tama | issuer/resource policy, principals, scopes, origins, rate limits, Ecto persistence, graph execution, durable results |
+| Tama | issuer/resource policy, principals, scopes, origins, rate limits, tool-validator cache engine, Ecto persistence, graph execution, durable results |
 | Tama Link | OAuth client behavior, upstream task correlation, polling recovery, downstream compatibility and progress presentation |
 
 TamaMCP may depend on TamaOAuth. TamaOAuth must not depend on TamaMCP. Neither
@@ -155,6 +155,7 @@ The intended module layout is:
 ```text
 TamaMCP
 TamaMCP.Authorization
+TamaMCP.Cache
 TamaMCP.Clock
 TamaMCP.Context
 TamaMCP.Error
@@ -267,9 +268,14 @@ use of a valid schema keyword. Generated schemas must default object contracts
 to `additionalProperties: false` unless the tool explicitly opts into unknown
 keys.
 
-Schemas must be compiled once and reused. Invalid schemas fail during server
-startup or compilation rather than on the first request. Runtime input and
-structured output are validated using `jsonschex`.
+Schemas must be compiled once and reused. Tool compilation validates each
+schema and embeds a serialized compiled-validator artifact so schema
+compilation never occurs in a request process. TamaMCP owns versioned cache
+keys, restoration, and validation semantics. A required application-supplied
+`TamaMCP.Cache` adapter owns storage, concurrency, expiry, distribution, and
+any engine-specific serialization. Invalid schemas fail during compilation
+rather than on the first request. Runtime input and structured output are
+validated using `jsonschex`.
 
 Tool annotations must be declared explicitly and emitted unchanged after
 validation. TamaMCP must not infer destructive, idempotent, read-only, or
@@ -1056,6 +1062,7 @@ Server configuration is explicit and validated once. It includes:
 - request and stream timeouts;
 - maximum body and schema sizes;
 - authorization adapter and options;
+- tool-validator cache adapter and options;
 - task store and options;
 - task runner and options;
 - notification bus and options;
@@ -1273,8 +1280,11 @@ Runtime dependencies are intentionally small:
 - `telemetry` for instrumentation.
 
 TamaMCP must not add a web server, database, queue, Phoenix, or another MCP
-implementation as a transitive runtime dependency. New dependencies require an
-ownership, maintenance, security, and release assessment.
+implementation as a transitive runtime dependency. It must not select or depend
+on a tool-validator cache engine; the host application supplies one through
+`TamaMCP.Cache`.
+New dependencies require an ownership, maintenance, security, and release
+assessment.
 
 ## 23. Branching and delivery
 

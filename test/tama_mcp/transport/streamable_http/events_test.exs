@@ -155,6 +155,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.EventsTest do
       [
         server: TamaMCP.TestSupport.Server,
         authorization: authorization,
+        cache: TamaMCP.TestSupport.Cache,
         telemetry_prefix: [:tama_mcp, :test]
       ] ++ opts
     )

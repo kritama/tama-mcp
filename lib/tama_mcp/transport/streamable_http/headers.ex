@@ -44,17 +44,25 @@ defmodule TamaMCP.Transport.StreamableHTTP.Headers do
       [] ->
         {:error, mismatch("Mcp-Method header is required")}
 
-      [method] when method == request.method ->
-        :ok
-
       [method] ->
-        {:error,
-         mismatch(
-           "Mcp-Method header #{inspect(method)} does not match #{inspect(request.method)}"
-         )}
+        compare_method(method, request.method)
 
       _ ->
         {:error, mismatch("Mcp-Method header must be a single value")}
+    end
+  end
+
+  defp compare_method(method, expected) do
+    case valid_plain(method) do
+      {:ok, ^expected} ->
+        :ok
+
+      {:ok, valid} ->
+        {:error,
+         mismatch("Mcp-Method header #{inspect(valid)} does not match #{inspect(expected)}")}
+
+      {:error, reason} ->
+        {:error, mismatch("Mcp-Method header is malformed: #{reason}")}
     end
   end
 

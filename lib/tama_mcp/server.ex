@@ -105,8 +105,8 @@ defmodule TamaMCP.Server do
     tool_metadata: 0,
     task_policy: 0,
     definition: 0,
-    input_validator: 0,
-    output_validator: 0,
+    input_validator: 2,
+    output_validator: 2,
     call: 2,
     parameter_headers: 0
   ]

@@ -23,6 +23,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     :server,
     :authorization,
     :authorization_options,
+    :cache,
+    :cache_options,
     :telemetry_prefix,
     :safe_metadata,
     :context_headers,
@@ -33,6 +35,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     :server,
     :authorization,
     :authorization_options,
+    :cache,
+    :cache_options,
     :telemetry_prefix,
     :safe_metadata,
     :context_headers,
@@ -43,6 +47,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
           server: module(),
           authorization: module(),
           authorization_options: keyword(),
+          cache: module(),
+          cache_options: keyword(),
           telemetry_prefix: [atom()],
           safe_metadata: (term(), term() -> term()) | nil,
           context_headers: [String.t()],
@@ -56,11 +62,19 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     authorization = Validation.module!(opts, :authorization)
     Validation.server!(server)
     Validation.authorization!(authorization)
+    cache = Validation.module!(opts, :cache)
+    Validation.cache!(cache)
 
     runtime = %__MODULE__{
       server: server,
       authorization: authorization,
-      authorization_options: Validation.keyword!(Keyword.get(opts, :authorization_options, [])),
+      authorization_options:
+        Validation.keyword!(
+          Keyword.get(opts, :authorization_options, []),
+          "authorization_options"
+        ),
+      cache: cache,
+      cache_options: Validation.keyword!(Keyword.get(opts, :cache_options, []), "cache_options"),
       telemetry_prefix: Validation.telemetry!(Keyword.get(opts, :telemetry_prefix, [:tama_mcp])),
       safe_metadata: Validation.metadata!(Keyword.get(opts, :safe_metadata)),
       context_headers: Validation.headers!(Keyword.get(opts, :context_headers, [])),

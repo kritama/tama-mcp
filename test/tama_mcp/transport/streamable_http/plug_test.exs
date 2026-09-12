@@ -23,7 +23,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     runtime =
       Plug.init(
         server: TamaMCP.TestSupport.Server,
-        authorization: TamaMCP.TestSupport.Authorization
+        authorization: TamaMCP.TestSupport.Authorization,
+        cache: TamaMCP.TestSupport.Cache
       )
 
     {:ok, runtime: runtime}
@@ -357,6 +358,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         Plug.init(
           server: TamaMCP.TestSupport.Server,
           authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
           context_headers: ["X-Trace"]
         )
 
@@ -469,6 +471,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         Plug.init(
           server: TamaMCP.TestSupport.Server,
           authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
           limits: [request_timeout_ms: 10]
         )
 
@@ -584,6 +587,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         Plug.init(
           server: TamaMCP.TestSupport.Server,
           authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
           limits: [max_body_bytes: 8]
         )
 
@@ -656,6 +660,27 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 400
       assert %{"error" => %{"code" => @header_mismatch}} = decode(conn)
+    end
+
+    test "rejects matching Mcp-Method values with unsafe characters", %{runtime: runtime} do
+      for method <- ["método", "bad\x01method"] do
+        params = %{"_meta" => base_meta()}
+
+        conn =
+          raw_post(runtime, Jason.encode!(envelope(method, params)), [
+            {"mcp-protocol-version", @version},
+            {"mcp-method", method},
+            {"content-type", "application/json"},
+            {"accept", "application/json, text/event-stream"}
+          ])
+
+        assert conn.status == 400
+
+        assert %{"error" => %{"code" => @header_mismatch, "message" => message}} =
+                 decode(conn)
+
+        assert message =~ "Mcp-Method header is malformed"
+      end
     end
 
     test "requires the Mcp-Name header for tools/call", %{runtime: runtime} do
@@ -776,6 +801,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         Plug.init(
           server: TamaMCP.TestSupport.Server,
           authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
           context_headers: ["X-Trace"],
           limits: [max_safe_metadata_bytes: 64]
         )
@@ -866,6 +892,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     Plug.init(
       server: TamaMCP.TestSupport.Server,
       authorization: TamaMCP.TestSupport.Authorization,
+      cache: TamaMCP.TestSupport.Cache,
       limits: [max_result_bytes: maximum]
     )
   end

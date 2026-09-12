@@ -7,7 +7,7 @@ defmodule TamaMCP.Tool do
   default to `additionalProperties: false`.
   """
 
-  alias TamaMCP.Tool.{Cache, Compiler}
+  alias TamaMCP.Tool.{Compiler, Validator}
 
   @callback call(input :: map(), context :: TamaMCP.Context.t()) ::
               {:ok, TamaMCP.Response.t()} | {:error, TamaMCP.Error.t()}
@@ -124,13 +124,19 @@ defmodule TamaMCP.Tool do
   defmacro __before_compile__(env), do: Compiler.before_compile(env)
 
   @doc false
-  def input_validator(module), do: Cache.fetch(module, :input, module.input_schema())
+  def input_validator(module, cache, cache_options \\ []) do
+    module.input_validator(cache, cache_options)
+  end
 
   @doc false
-  def output_validator(module) do
-    case module.output_schema() do
-      nil -> nil
-      schema -> Cache.fetch(module, :output, schema)
-    end
+  def output_validator(module, cache, cache_options \\ []) do
+    module.output_validator(cache, cache_options)
+  end
+
+  @doc false
+  def __validator__(_module, :output, nil, _cache, _cache_options), do: nil
+
+  def __validator__(module, kind, encoded, cache, cache_options) do
+    Validator.fetch(module, kind, encoded, cache, cache_options)
   end
 end

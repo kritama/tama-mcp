@@ -82,6 +82,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
              )
   end
 
+  test "method headers reject unsafe characters before body comparison" do
+    for method <- ["método", "bad\x01method"] do
+      request = request(method, %{})
+
+      assert {:error, %TamaMCP.Error{code: -32_020}} =
+               Headers.match(conn([{"mcp-method", method}]), request)
+    end
+  end
+
   test "name headers support the Base64 sentinel and reject malformed or unexpected names" do
     request = request(Protocol.method(:tools_call), %{"name" => "echo"})
     encoded = "=?base64?#{Base.encode64("echo")}?="

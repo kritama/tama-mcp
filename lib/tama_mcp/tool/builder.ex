@@ -6,8 +6,8 @@ defmodule TamaMCP.Tool.Builder do
 
   def before_compile(env) do
     attributes = attributes(env.module)
-    input = compile_schema!(attributes.input, :input, env)
-    output = compile_schema!(attributes.output, :output, env)
+    {input, input_validator} = compile_schema!(attributes.input, :input, env)
+    {output, output_validator} = compile_schema!(attributes.output, :output, env)
     headers = compile_headers!(input, env)
 
     metadata = %Metadata{
@@ -25,7 +25,19 @@ defmodule TamaMCP.Tool.Builder do
     ensure_callback!(env)
 
     quote do
-      unquote(schema_functions(metadata, input, output, headers, attributes.task, definition))
+      unquote(
+        schema_functions(
+          metadata,
+          input,
+          output,
+          input_validator,
+          output_validator,
+          headers,
+          attributes.task,
+          definition
+        )
+      )
+
       unquote(policy_functions(attributes.scopes, attributes.annotations))
     end
   end
@@ -42,25 +54,22 @@ defmodule TamaMCP.Tool.Builder do
     }
   end
 
-  defp compile_schema!(nil, :output, _env), do: nil
+  defp compile_schema!(nil, :output, _env), do: {nil, nil}
 
   defp compile_schema!(nil, :input, _env) do
     schema = %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
-    validate!(schema, "default input schema")
-    schema
+    {schema, compile!(schema, "default input schema")}
   end
 
   defp compile_schema!({allow_unknown?, fields}, kind, env) when is_boolean(allow_unknown?) do
     schema = Schema.build_object_schema(fields, allow_unknown_keys: allow_unknown?)
     validate_root!(schema, kind, env)
-    validate!(schema, "#{kind} schema")
-    schema
+    {schema, compile!(schema, "#{kind} schema")}
   end
 
   defp compile_schema!({:raw, schema}, kind, env) do
     if kind == :input, do: validate_root!(schema, kind, env)
-    validate!(schema, "#{kind} schema")
-    schema
+    {schema, compile!(schema, "#{kind} schema")}
   end
 
   defp validate_root!(schema, kind, env) do
@@ -73,9 +82,9 @@ defmodule TamaMCP.Tool.Builder do
     end
   end
 
-  defp validate!(schema, label) do
+  defp compile!(schema, label) do
     case Schema.compile(schema) do
-      {:ok, _compiled} -> :ok
+      {:ok, compiled} -> :erlang.term_to_binary(compiled, [:deterministic])
       {:error, reason} -> raise CompileError, description: "invalid #{label}: #{reason}"
     end
   end
@@ -107,7 +116,16 @@ defmodule TamaMCP.Tool.Builder do
   defp put(map, _key, nil), do: map
   defp put(map, key, value), do: Map.put(map, key, value)
 
-  defp schema_functions(metadata, input, output, headers, task, definition) do
+  defp schema_functions(
+         metadata,
+         input,
+         output,
+         input_validator,
+         output_validator,
+         headers,
+         task,
+         definition
+       ) do
     quote do
       @doc false
       def tool_metadata, do: unquote(Macro.escape(metadata))
@@ -121,6 +139,27 @@ defmodule TamaMCP.Tool.Builder do
       def task_policy, do: unquote(task)
       @doc false
       def definition, do: unquote(Macro.escape(definition))
+      @doc false
+      def input_validator(cache, cache_options),
+        do:
+          TamaMCP.Tool.__validator__(
+            __MODULE__,
+            :input,
+            unquote(input_validator),
+            cache,
+            cache_options
+          )
+
+      @doc false
+      def output_validator(cache, cache_options),
+        do:
+          TamaMCP.Tool.__validator__(
+            __MODULE__,
+            :output,
+            unquote(output_validator),
+            cache,
+            cache_options
+          )
     end
   end
 
@@ -130,10 +169,6 @@ defmodule TamaMCP.Tool.Builder do
       def scopes, do: unquote(scopes)
       @doc false
       def annotations, do: unquote(Macro.escape(annotations))
-      @doc false
-      def input_validator, do: TamaMCP.Tool.input_validator(__MODULE__)
-      @doc false
-      def output_validator, do: TamaMCP.Tool.output_validator(__MODULE__)
     end
   end
 

@@ -36,9 +36,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     end
   end
 
-  def keyword!(value) do
+  def cache!(cache) do
+    unless exports?(cache, fetch: 3) do
+      raise ArgumentError,
+            "cache: #{inspect(cache)} does not implement TamaMCP.Cache (missing fetch/3)"
+    end
+  end
+
+  def keyword!(value, label) do
     unless Keyword.keyword?(value) do
-      raise ArgumentError, "authorization_options must be a keyword list, got: #{inspect(value)}"
+      raise ArgumentError, "#{label} must be a keyword list, got: #{inspect(value)}"
     end
 
     value

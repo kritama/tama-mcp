@@ -17,7 +17,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
 
   @valid [
     server: TamaMCP.TestSupport.Server,
-    authorization: TamaMCP.TestSupport.Authorization
+    authorization: TamaMCP.TestSupport.Authorization,
+    cache: TamaMCP.TestSupport.Cache
   ]
 
   @unloaded TamaMCP.TestSupport.Fakes.NeverDefinedServer
@@ -30,6 +31,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.server == TamaMCP.TestSupport.Server
       assert runtime.authorization == TamaMCP.TestSupport.Authorization
       assert runtime.authorization_options == []
+      assert runtime.cache == TamaMCP.TestSupport.Cache
+      assert runtime.cache_options == []
       assert runtime.telemetry_prefix == [:tama_mcp]
       assert runtime.safe_metadata == nil
       assert runtime.context_headers == []
@@ -115,12 +118,28 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(server: TamaMCP.TestSupport.Server, authorization: @unloaded)
       end
     end
+
+    test "rejects a compiled module that is missing fetch/3" do
+      assert_raise ArgumentError, ~r/does not implement TamaMCP.Cache/, fn ->
+        Runtime.build(
+          server: TamaMCP.TestSupport.Server,
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: @plain
+        )
+      end
+    end
   end
 
   describe "option validation" do
     test "rejects a non-keyword authorization_options" do
       assert_raise ArgumentError, ~r/authorization_options must be a keyword list/, fn ->
         Runtime.build(@valid ++ [authorization_options: "not-a-keyword"])
+      end
+    end
+
+    test "rejects non-keyword cache_options" do
+      assert_raise ArgumentError, ~r/cache_options must be a keyword list/, fn ->
+        Runtime.build(@valid ++ [cache_options: "not-a-keyword"])
       end
     end
 
@@ -221,6 +240,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(
           server: Verbose,
           authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
           limits: [max_result_bytes: 64]
         )
       end
@@ -275,7 +295,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert_raise ArgumentError, ~r/task policy :required/, fn ->
         Runtime.build(
           server: TamaMCP.TestSupport.TaskRequiredServer,
-          authorization: TamaMCP.TestSupport.Authorization
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache
         )
       end
     end

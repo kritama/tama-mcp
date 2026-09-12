@@ -65,7 +65,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   end
 
   defp validate_and_run(conn, request, module, arguments, decision, runtime, base) do
-    case Schema.validate(module.input_validator(), arguments) do
+    case Schema.validate(module.input_validator(runtime.cache, runtime.cache_options), arguments) do
       :ok ->
         Events.emit(runtime, [:tool, :validation], %{status: :ok}, base)
         run(conn, request, module, arguments, decision, runtime, base)
@@ -113,7 +113,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
 
   defp complete(conn, request, module, response, runtime, base) do
     with :ok <- Response.validate(response),
-         :ok <- structured(module, response),
+         :ok <- structured(module, response, runtime),
          result = Response.encode(response) |> Wire.merge_meta(Result.metadata(runtime.server)),
          :ok <- protocol_result(result),
          {:ok, reply} <-
@@ -132,8 +132,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     end
   end
 
-  defp structured(module, response) do
-    case module.output_validator() do
+  defp structured(module, response, runtime) do
+    case module.output_validator(runtime.cache, runtime.cache_options) do
       nil ->
         :ok
 

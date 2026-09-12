@@ -18,6 +18,8 @@ The project follows Semantic Versioning and uses Conventional Commits.
   contexts, bounded errors, and telemetry.
 - Vendored Phase 1 wire fixtures and reusable `TamaMCP.Conformance` validators.
 - Explicit JSON `null` support for structured tool results.
+- An application-owned tool-validator cache behaviour with versioned TamaMCP
+  cache keys and compile-time serialized validator artifacts.
 
 ### Security
 
@@ -35,3 +37,4 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Tie synchronous tool workers to their request lifetime and execution deadline.
 - Combine repeated list-valued `Accept` fields while retaining strict handling
   for single-valued transport headers.
+- Reject unsafe `Mcp-Method` header characters before header/body comparison.

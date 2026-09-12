@@ -11,7 +11,8 @@ defmodule TamaMCP.ConformanceTest do
     runtime =
       MCPPlug.init(
         server: TamaMCP.TestSupport.Server,
-        authorization: TamaMCP.TestSupport.Authorization
+        authorization: TamaMCP.TestSupport.Authorization,
+        cache: TamaMCP.TestSupport.Cache
       )
 
     {result, log} = with_log(fn -> Conformance.run(&request(&1, runtime)) end)
