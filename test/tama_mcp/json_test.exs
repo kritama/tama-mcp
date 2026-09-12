@@ -24,4 +24,16 @@ defmodule TamaMCP.JSONTest do
              adapter: %TamaMCP.TestSupport.Encodable{secret: "must-not-escape"}
            })
   end
+
+  test "protocol metadata enforces the MCP key-name grammar" do
+    assert JSON.meta_object?(%{
+             "progressToken" => 1,
+             "example.com/value_name-1" => %{"nested key" => true},
+             "io.modelcontextprotocol/serverInfo" => %{}
+           })
+
+    for key <- ["bad key", "/name", "1example.com/name", "example-.com/name", "_name"] do
+      refute JSON.meta_object?(%{key => true})
+    end
+  end
 end

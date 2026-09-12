@@ -1,7 +1,7 @@
 defmodule TamaMCP.Transport.StreamableHTTP.Request do
   @moduledoc false
 
-  alias TamaMCP.Protocol
+  alias TamaMCP.{JSON, Protocol}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
   alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters}
 
@@ -106,7 +106,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
   defp params(%{"params" => params}) when is_map(params), do: {:ok, params}
   defp params(_json), do: {:error, TamaMCP.Error.invalid_params("params is required")}
 
-  defp meta(%{"_meta" => meta}) when is_map(meta), do: {:ok, meta}
+  defp meta(%{"_meta" => meta}) when is_map(meta) do
+    if JSON.meta_object?(meta) do
+      {:ok, meta}
+    else
+      {:error, TamaMCP.Error.invalid_params("params._meta contains an invalid metadata key")}
+    end
+  end
+
   defp meta(_params), do: {:error, TamaMCP.Error.invalid_params("params._meta is required")}
 
   defp protocol_version(meta) do

@@ -114,4 +114,11 @@ defmodule TamaMCP.SchemaTest do
       Schema.field_schema(:integer, pattern: "x")
     end
   end
+
+  test "distinguishes an omitted default from an explicit JSON null default" do
+    type = {:raw, %{"type" => ["string", "null"]}}
+
+    refute Map.has_key?(Schema.field_schema(type), "default")
+    assert Map.fetch!(Schema.field_schema(type, default: nil), "default") == nil
+  end
 end

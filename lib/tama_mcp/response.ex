@@ -142,6 +142,14 @@ defmodule TamaMCP.Response do
 
   defp validate_json_safe(_name, nil), do: :ok
 
+  defp validate_json_safe(:meta, value) do
+    cond do
+      not JSON.value?(value) -> {:error, :non_json_safe}
+      JSON.meta_object?(value) -> :ok
+      true -> {:error, :invalid_metadata}
+    end
+  end
+
   defp validate_json_safe(_name, value),
     do: if(JSON.value?(value), do: :ok, else: {:error, :non_json_safe})
 end

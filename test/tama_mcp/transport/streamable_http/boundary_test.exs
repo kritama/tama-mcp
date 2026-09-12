@@ -184,6 +184,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
              Request.validate(valid_conn, encode(invalid_info), TamaMCP.TestSupport.Server)
   end
 
+  test "request parsing rejects invalid protocol metadata key names" do
+    method = Protocol.method(:server_discover)
+    valid_conn = conn([{"mcp-method", method}])
+    invalid = envelope(method, params(%{"bad key" => true}))
+
+    assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
+             Request.validate(valid_conn, encode(invalid), TamaMCP.TestSupport.Server)
+  end
+
   defp conn(headers), do: %{Plug.Test.conn(:post, "/", "") | req_headers: headers}
 
   defp adapter_conn(replies) do

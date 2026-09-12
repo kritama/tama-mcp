@@ -182,7 +182,7 @@ defmodule TamaMCP.Schema do
     schema
     |> maybe_put("title", Keyword.get(opts, :title))
     |> maybe_put("description", Keyword.get(opts, :description))
-    |> maybe_put("default", Keyword.get(opts, :default))
+    |> maybe_put_option("default", opts, :default)
     |> maybe_put(
       "minLength",
       validated_length(Keyword.get(opts, :min_length), type, :min_length)
@@ -198,6 +198,13 @@ defmodule TamaMCP.Schema do
 
   defp maybe_put(schema, _key, nil), do: schema
   defp maybe_put(schema, key, value), do: Map.put(schema, key, value)
+
+  defp maybe_put_option(schema, key, opts, option) do
+    case Keyword.fetch(opts, option) do
+      {:ok, value} -> Map.put(schema, key, value)
+      :error -> schema
+    end
+  end
 
   defp validated_length(value, :string, _option) when is_integer(value) and value >= 0,
     do: value

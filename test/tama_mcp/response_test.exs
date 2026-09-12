@@ -74,4 +74,12 @@ defmodule TamaMCP.ResponseTest do
     assert {:error, :non_json_safe} =
              Response.validate(Response.success(structured_content: %{atom_key: "value"}))
   end
+
+  test "validation rejects metadata with invalid protocol key names" do
+    assert {:error, :invalid_metadata} =
+             Response.validate(Response.success(meta: %{"bad key" => true}))
+
+    assert {:error, :invalid_metadata} =
+             Response.validate(Response.success(meta: "not-an-object"))
+  end
 end

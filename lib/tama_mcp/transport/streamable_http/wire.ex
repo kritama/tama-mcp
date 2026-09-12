@@ -57,12 +57,20 @@ defmodule TamaMCP.Transport.StreamableHTTP.Wire do
         envelope
 
       {:error, _details} ->
-        %{
+        fallback = %{
           "jsonrpc" => "2.0",
           "error" => %{"code" => Protocol.error_code(:internal), "message" => "Internal error"}
         }
+
+        preserve_id(fallback, envelope)
     end
   end
+
+  defp preserve_id(fallback, %{"id" => id}) when is_binary(id) or is_integer(id) do
+    Map.put(fallback, "id", id)
+  end
+
+  defp preserve_id(fallback, _envelope), do: fallback
 
   defp maybe_authenticate(conn, nil), do: conn
 

@@ -483,6 +483,19 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
   end
 
   describe "transport and envelope validation" do
+    test "preserves readable request IDs when malformed errors use the fallback", %{
+      runtime: runtime
+    } do
+      malformed = %TamaMCP.Error{code: "invalid", message: "failure"}
+
+      for id <- ["request-1", ""] do
+        {conn, _meta} = Wire.error(conn(:post, "/", ""), id, malformed, %{}, runtime)
+
+        assert conn.status == 500
+        assert %{"id" => ^id, "error" => %{"code" => @internal}} = decode(conn)
+      end
+    end
+
     test "rejects non-POST requests", %{runtime: runtime} do
       conn =
         :get
