@@ -7,7 +7,8 @@ defmodule TamaMCP.Tool do
   default to `additionalProperties: false`.
   """
 
-  alias TamaMCP.Tool.{Compiler, Validator}
+  alias TamaMCP.Cache.Validator
+  alias TamaMCP.Tool.Compiler
 
   @callback call(input :: map(), context :: TamaMCP.Context.t()) ::
               {:ok, TamaMCP.Response.t()} | {:error, TamaMCP.Error.t()}
@@ -134,9 +135,9 @@ defmodule TamaMCP.Tool do
   end
 
   @doc false
-  def __validator__(_module, :output, nil, _cache, _cache_options), do: nil
+  def __validator__(nil, _cache, _cache_options), do: nil
 
-  def __validator__(module, kind, encoded, cache, cache_options) do
-    Validator.fetch(module, kind, encoded, cache, cache_options)
+  def __validator__(artifact, cache, cache_options) do
+    Validator.fetch(artifact, cache, cache_options)
   end
 end

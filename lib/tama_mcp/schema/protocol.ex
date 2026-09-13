@@ -1,6 +1,7 @@
 defmodule TamaMCP.Schema.Protocol do
   @moduledoc false
 
+  alias TamaMCP.Cache.Validator
   alias TamaMCP.Schema
 
   @schema_path "protocol/2026-07-28/core/schema/2026-07-28/schema.json"
@@ -17,6 +18,23 @@ defmodule TamaMCP.Schema.Protocol do
     list_tools_response: "ListToolsResultResponse"
   }
 
+  @schema_file Path.expand("../../../priv/#{@schema_path}", __DIR__)
+  @external_resource @schema_file
+  @schema @schema_file |> File.read!() |> Jason.decode!()
+
+  @validators Map.new(Enum.sort(@definitions), fn {kind, definition} ->
+                root = %{
+                  "$schema" => @schema["$schema"],
+                  "$defs" => @schema["$defs"],
+                  "$ref" => "#/$defs/#{definition}"
+                }
+
+                case Schema.compile(root) do
+                  {:ok, compiled} -> {kind, Validator.artifact(__MODULE__, kind, compiled)}
+                  {:error, reason} -> raise Schema.Error, message: reason
+                end
+              end)
+
   @type kind ::
           :call_tool_request
           | :call_tool_result
@@ -29,38 +47,9 @@ defmodule TamaMCP.Schema.Protocol do
           | :list_tools_result
           | :list_tools_response
 
-  @spec validate(kind(), term()) :: :ok | {:error, [String.t()]}
-  def validate(kind, value) when is_map_key(@definitions, kind) do
-    Schema.validate(validator(kind), value)
-  end
-
-  defp validator(kind) do
-    key = {__MODULE__, kind}
-
-    case :persistent_term.get(key, :undefined) do
-      :undefined ->
-        validator = compile!(kind)
-        :persistent_term.put(key, validator)
-        validator
-
-      validator ->
-        validator
-    end
-  end
-
-  defp compile!(kind) do
-    path = Application.app_dir(:tama_mcp, "priv/#{@schema_path}")
-    schema = path |> File.read!() |> Jason.decode!()
-
-    root = %{
-      "$schema" => schema["$schema"],
-      "$defs" => schema["$defs"],
-      "$ref" => "#/$defs/#{Map.fetch!(@definitions, kind)}"
-    }
-
-    case Schema.compile(root) do
-      {:ok, validator} -> validator
-      {:error, reason} -> raise Schema.Error, message: reason
-    end
+  @spec validate(kind(), term(), module(), keyword()) :: :ok | {:error, [String.t()]}
+  def validate(kind, value, cache, cache_options \\ []) when is_map_key(@definitions, kind) do
+    artifact = Map.fetch!(@validators, kind)
+    Schema.validate(Validator.fetch(artifact, cache, cache_options), value)
   end
 end

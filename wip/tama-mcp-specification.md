@@ -142,7 +142,7 @@ Tama authorization, durable task rows, PubSub, graph execution
 | --- | --- |
 | TamaMCP | MCP wire protocol, JSON-RPC, schemas, DSL, validator artifacts and cache keys, request context, task protocol state, subscription streams, adapter behaviours |
 | TamaOAuth | OAuth and protected-resource protocol mechanics |
-| Tama | issuer/resource policy, principals, scopes, origins, rate limits, tool-validator cache engine, Ecto persistence, graph execution, durable results |
+| Tama | issuer/resource policy, principals, scopes, origins, rate limits, validator cache engine, Ecto persistence, graph execution, durable results |
 | Tama Link | OAuth client behavior, upstream task correlation, polling recovery, downstream compatibility and progress presentation |
 
 TamaMCP may depend on TamaOAuth. TamaOAuth must not depend on TamaMCP. Neither
@@ -268,14 +268,15 @@ use of a valid schema keyword. Generated schemas must default object contracts
 to `additionalProperties: false` unless the tool explicitly opts into unknown
 keys.
 
-Schemas must be compiled once and reused. Tool compilation validates each
-schema and embeds a serialized compiled-validator artifact so schema
-compilation never occurs in a request process. TamaMCP owns versioned cache
-keys, restoration, and validation semantics. A required application-supplied
+Schemas must be compiled once and reused. Tool compilation validates each tool
+schema, and TamaMCP compilation validates each fixed vendored protocol schema.
+Both paths embed serialized compiled-validator artifacts so schema compilation
+never occurs in a request process. TamaMCP owns versioned cache keys,
+restoration, and validation semantics. A required application-supplied
 `TamaMCP.Cache` adapter owns storage, concurrency, expiry, distribution, and
 any engine-specific serialization. Invalid schemas fail during compilation
-rather than on the first request. Runtime input and structured output are
-validated using `jsonschex`.
+rather than on the first request. Runtime input, structured output, and wire
+values are validated using `jsonschex`.
 
 Tool annotations must be declared explicitly and emitted unchanged after
 validation. TamaMCP must not infer destructive, idempotent, read-only, or
@@ -1031,6 +1032,11 @@ Tama owns:
 TamaMCP must not accept identity from an unvalidated request field. It derives
 authorization only from the configured adapter result.
 
+Tool scopes must be valid OAuth scope tokens. Transport initialization must
+reject a catalog whose complete insufficient-scope challenge exceeds the
+configured `max_www_authenticate_bytes`; TamaMCP must not truncate the required
+scope set or emit an unbounded `WWW-Authenticate` value.
+
 Protected-resource metadata remains a Tama web route composed with TamaOAuth.
 It is not hidden inside the MCP transport Plug.
 
@@ -1062,7 +1068,7 @@ Server configuration is explicit and validated once. It includes:
 - request and stream timeouts;
 - maximum body and schema sizes;
 - authorization adapter and options;
-- tool-validator cache adapter and options;
+- validator cache adapter and options;
 - task store and options;
 - task runner and options;
 - notification bus and options;
@@ -1092,6 +1098,7 @@ The initial production defaults are:
 | `stream_max_lifetime_ms` | `3_600_000` | maximum stream lifetime before graceful reconnect |
 | `max_status_message_bytes` | `2_048` | maximum encoded task status message |
 | `max_error_data_bytes` | `8_192` | maximum encoded public error data |
+| `max_www_authenticate_bytes` | `4_096` | maximum encoded `WWW-Authenticate` response-header value |
 | `max_safe_metadata_bytes` | `16_384` | maximum encoded selected context/telemetry metadata |
 
 All sizes are measured after UTF-8 or canonical JSON encoding as applicable.
@@ -1281,7 +1288,7 @@ Runtime dependencies are intentionally small:
 
 TamaMCP must not add a web server, database, queue, Phoenix, or another MCP
 implementation as a transitive runtime dependency. It must not select or depend
-on a tool-validator cache engine; the host application supplies one through
+on a validator cache engine; the host application supplies one through
 `TamaMCP.Cache`.
 New dependencies require an ownership, maintenance, security, and release
 assessment.

@@ -1,10 +1,12 @@
 defmodule TamaMCP.Cache do
   @moduledoc """
-  Application-owned cache adapter used for compiled tool validators.
+  Application-owned cache adapter used for compiled validators.
 
-  TamaMCP owns cache keys and validator compilation. The host application owns
-  storage, concurrency, expiry, and any serialization required by its cache
-  engine. Cached values are opaque Erlang terms and may contain functions.
+  TamaMCP compiles tool and fixed protocol validators, embeds serialized
+  artifacts, and owns their versioned cache keys and restoration. The host
+  application owns storage, concurrency, expiry, and any serialization required
+  by its cache engine. Cached values are opaque Erlang terms and may contain
+  functions.
   """
 
   @type key :: String.t()

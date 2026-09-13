@@ -82,7 +82,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
     with :ok <- Body.validate(conn),
          {:ok, conn} <- Request.validate_headers(conn),
          {:ok, body, conn} <- Body.read(conn, runtime.limits),
-         {:ok, request, conn} <- Request.validate(conn, body, runtime.server) do
+         {:ok, request, conn} <- Request.validate(conn, body, runtime) do
       Dispatch.call(conn, request, decision, runtime, base)
     else
       {:error, %TamaMCP.Error{} = error} ->

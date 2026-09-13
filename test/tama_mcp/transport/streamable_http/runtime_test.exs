@@ -3,6 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
 
   use ExUnit.Case
 
+  alias TamaMCP.Authorization.Challenge
   alias TamaMCP.Transport.StreamableHTTP.{Result, Runtime}
 
   defmodule Verbose do
@@ -39,6 +40,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.limits.max_body_bytes == 1_048_576
       assert runtime.limits.max_result_bytes == 1_048_576
       assert runtime.limits.max_tools_per_server == 256
+      assert runtime.limits.max_www_authenticate_bytes == 4_096
       assert runtime.limits.request_timeout_ms == 30_000
     end
 
@@ -221,6 +223,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert_raise ArgumentError, ~r/at least 2/, fn ->
         Runtime.build(@valid ++ [limits: [max_safe_metadata_bytes: 1]])
       end
+
+      assert_raise ArgumentError,
+                   ~r/max_www_authenticate_bytes must be an integer of at least/,
+                   fn ->
+                     Runtime.build(
+                       @valid ++
+                         [limits: [max_www_authenticate_bytes: Challenge.minimum_size() - 1]]
+                     )
+                   end
     end
 
     test "rejects schemas that exceed the configured byte limit" do
@@ -232,6 +243,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
     test "rejects catalogs that exceed the configured tool limit" do
       assert_raise ArgumentError, ~r/max_tools_per_server/, fn ->
         Runtime.build(@valid ++ [limits: [max_tools_per_server: 1]])
+      end
+    end
+
+    test "rejects scope challenges that exceed the configured response-header limit" do
+      {:ok, challenge} = Challenge.insufficient_scope(["test.echo"], 1_024)
+
+      assert_raise ArgumentError, ~r/scope challenge exceeds.*max_www_authenticate_bytes/, fn ->
+        Runtime.build(
+          @valid ++
+            [limits: [max_www_authenticate_bytes: byte_size(challenge) - 1]]
+        )
       end
     end
 

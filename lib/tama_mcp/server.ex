@@ -103,6 +103,7 @@ defmodule TamaMCP.Server do
   # one place so the DSL boundary validates the complete runtime-facing contract.
   @tool_contract [
     tool_metadata: 0,
+    scopes: 0,
     task_policy: 0,
     definition: 0,
     input_validator: 2,

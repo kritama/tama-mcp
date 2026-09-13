@@ -1,7 +1,10 @@
 defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   @moduledoc false
 
+  alias TamaMCP.Authorization.Challenge
   alias TamaMCP.Transport.StreamableHTTP.{Result, Wire}
+
+  @min_www_authenticate_bytes Challenge.minimum_size()
 
   def options!(opts, allowed) do
     unless Keyword.keyword?(opts) do
@@ -124,8 +127,30 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
               "(max_tools_per_server)"
     end
 
-    Enum.each(tools, &schemas!(&1, limits.max_schema_bytes))
+    Enum.each(tools, fn entry ->
+      schemas!(entry, limits.max_schema_bytes)
+      challenge!(entry, limits.max_www_authenticate_bytes)
+    end)
+
     results!(server, limits.max_result_bytes)
+  end
+
+  defp challenge!(entry, maximum) do
+    case entry.module.scopes() do
+      [] ->
+        :ok
+
+      scopes ->
+        case Challenge.insufficient_scope(scopes, maximum) do
+          {:ok, _challenge} ->
+            :ok
+
+          {:error, :too_large} ->
+            raise ArgumentError,
+                  "tool #{inspect(entry.name)} scope challenge exceeds #{maximum} bytes " <>
+                    "(max_www_authenticate_bytes)"
+        end
+    end
   end
 
   defp results!(server, maximum) do
@@ -184,6 +209,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   defp positive!(:max_safe_metadata_bytes, value) do
     raise ArgumentError,
           "limit :max_safe_metadata_bytes must be an integer of at least 2, got: #{inspect(value)}"
+  end
+
+  defp positive!(:max_www_authenticate_bytes, value)
+       when is_integer(value) and value >= @min_www_authenticate_bytes,
+       do: value
+
+  defp positive!(:max_www_authenticate_bytes, value) do
+    raise ArgumentError,
+          "limit :max_www_authenticate_bytes must be an integer of at least " <>
+            "#{@min_www_authenticate_bytes}, got: #{inspect(value)}"
   end
 
   defp positive!(_key, value) when is_integer(value) and value > 0, do: value

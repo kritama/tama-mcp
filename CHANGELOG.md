@@ -18,8 +18,8 @@ The project follows Semantic Versioning and uses Conventional Commits.
   contexts, bounded errors, and telemetry.
 - Vendored Phase 1 wire fixtures and reusable `TamaMCP.Conformance` validators.
 - Explicit JSON `null` support for structured tool results.
-- An application-owned tool-validator cache behaviour with versioned TamaMCP
-  cache keys and compile-time serialized validator artifacts.
+- An application-owned validator cache behaviour with versioned TamaMCP cache
+  keys and compile-time serialized tool and protocol validator artifacts.
 
 ### Security
 
@@ -39,3 +39,5 @@ The project follows Semantic Versioning and uses Conventional Commits.
   for single-valued transport headers.
 - Reject unsafe `MCP-Protocol-Version` and `Mcp-Method` header characters before
   version negotiation or header/body comparison.
+- Validate OAuth scope-token syntax and reject oversized insufficient-scope
+  challenges during transport initialization.

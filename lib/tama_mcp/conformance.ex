@@ -49,13 +49,15 @@ defmodule TamaMCP.Conformance do
           | :list_tools_response
 
   @doc "Validates a protocol value against the vendored MCP schema."
-  @spec validate(kind(), term()) :: :ok | {:error, [String.t()]}
-  def validate(kind, value), do: Protocol.validate(kind, value)
+  @spec validate(kind(), term(), module(), keyword()) :: :ok | {:error, [String.t()]}
+  def validate(kind, value, cache, cache_options \\ []) do
+    Protocol.validate(kind, value, cache, cache_options)
+  end
 
   @doc "Validates a protocol value, raising a schema validation exception when it is invalid."
-  @spec validate!(kind(), term()) :: :ok
-  def validate!(kind, value) do
-    case validate(kind, value) do
+  @spec validate!(kind(), term(), module(), keyword()) :: :ok
+  def validate!(kind, value, cache, cache_options \\ []) do
+    case validate(kind, value, cache, cache_options) do
       :ok -> :ok
       {:error, details} -> raise TamaMCP.Schema.Error, message: Enum.join(details, "; ")
     end
@@ -66,11 +68,15 @@ defmodule TamaMCP.Conformance do
   def fixtures, do: @fixtures
 
   @doc "Runs every supplied fixture through an application request callback."
-  @spec run((map() -> map()), [map()]) :: :ok | {:error, [String.t()]}
-  def run(request, fixtures \\ @fixtures) when is_function(request, 1) and is_list(fixtures) do
+  @spec run((map() -> map()), module(), [map()], keyword()) :: :ok | {:error, [String.t()]}
+  def run(request, cache, fixtures \\ @fixtures, cache_options \\ [])
+
+  def run(request, cache, fixtures, cache_options)
+      when is_function(request, 1) and is_atom(cache) and is_list(fixtures) and
+             is_list(cache_options) do
     errors =
       Enum.flat_map(fixtures, fn fixture ->
-        case verify(fixture, request.(fixture["request"])) do
+        case verify(fixture, request.(fixture["request"]), cache, cache_options) do
           :ok -> []
           {:error, details} -> Enum.map(details, &"#{fixture["name"]}: #{&1}")
         end
@@ -80,8 +86,11 @@ defmodule TamaMCP.Conformance do
   end
 
   @doc "Verifies one normalized response and both protocol schema expectations."
-  @spec verify(map(), map()) :: :ok | {:error, [String.t()]}
-  def verify(fixture, response) when is_map(fixture) and is_map(response) do
+  @spec verify(map(), map(), module(), keyword()) :: :ok | {:error, [String.t()]}
+  def verify(fixture, response, cache, cache_options \\ [])
+
+  def verify(fixture, response, cache, cache_options)
+      when is_map(fixture) and is_map(response) and is_atom(cache) and is_list(cache_options) do
     expected = fixture["expected"]
 
     []
@@ -91,9 +100,17 @@ defmodule TamaMCP.Conformance do
     |> verify_schema(
       fixture["requestSchema"],
       fixture["requestValid"],
-      fixture["request"]["body"]
+      fixture["request"]["body"],
+      cache,
+      cache_options
     )
-    |> verify_schema(fixture["responseSchema"], true, response[:body])
+    |> verify_schema(
+      fixture["responseSchema"],
+      true,
+      response[:body],
+      cache,
+      cache_options
+    )
     |> case do
       [] -> :ok
       errors -> {:error, Enum.reverse(errors)}
@@ -111,8 +128,8 @@ defmodule TamaMCP.Conformance do
     end)
   end
 
-  defp verify_schema(errors, name, valid?, value) do
-    result = validate(Map.fetch!(@kinds, name), value)
+  defp verify_schema(errors, name, valid?, value, cache, cache_options) do
+    result = validate(Map.fetch!(@kinds, name), value, cache, cache_options)
 
     case {valid?, result} do
       {true, :ok} -> errors

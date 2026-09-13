@@ -1,6 +1,7 @@
 defmodule TamaMCP.Tool.Builder do
   @moduledoc false
 
+  alias TamaMCP.Cache.Validator
   alias TamaMCP.Schema
   alias TamaMCP.Tool.{Headers, Metadata}
 
@@ -56,20 +57,20 @@ defmodule TamaMCP.Tool.Builder do
 
   defp compile_schema!(nil, :output, _env), do: {nil, nil}
 
-  defp compile_schema!(nil, :input, _env) do
+  defp compile_schema!(nil, :input, env) do
     schema = %{"type" => "object", "properties" => %{}, "additionalProperties" => false}
-    {schema, compile!(schema, "default input schema")}
+    {schema, compile!(schema, "default input schema", env.module, :input)}
   end
 
   defp compile_schema!({allow_unknown?, fields}, kind, env) when is_boolean(allow_unknown?) do
     schema = Schema.build_object_schema(fields, allow_unknown_keys: allow_unknown?)
     validate_root!(schema, kind, env)
-    {schema, compile!(schema, "#{kind} schema")}
+    {schema, compile!(schema, "#{kind} schema", env.module, kind)}
   end
 
   defp compile_schema!({:raw, schema}, kind, env) do
     if kind == :input, do: validate_root!(schema, kind, env)
-    {schema, compile!(schema, "#{kind} schema")}
+    {schema, compile!(schema, "#{kind} schema", env.module, kind)}
   end
 
   defp validate_root!(schema, kind, env) do
@@ -82,9 +83,9 @@ defmodule TamaMCP.Tool.Builder do
     end
   end
 
-  defp compile!(schema, label) do
+  defp compile!(schema, label, module, kind) do
     case Schema.compile(schema) do
-      {:ok, compiled} -> :erlang.term_to_binary(compiled, [:deterministic])
+      {:ok, compiled} -> Validator.artifact(module, kind, compiled)
       {:error, reason} -> raise CompileError, description: "invalid #{label}: #{reason}"
     end
   end
@@ -143,9 +144,7 @@ defmodule TamaMCP.Tool.Builder do
       def input_validator(cache, cache_options),
         do:
           TamaMCP.Tool.__validator__(
-            __MODULE__,
-            :input,
-            unquote(input_validator),
+            unquote(Macro.escape(input_validator)),
             cache,
             cache_options
           )
@@ -154,9 +153,7 @@ defmodule TamaMCP.Tool.Builder do
       def output_validator(cache, cache_options),
         do:
           TamaMCP.Tool.__validator__(
-            __MODULE__,
-            :output,
-            unquote(output_validator),
+            unquote(Macro.escape(output_validator)),
             cache,
             cache_options
           )

@@ -63,7 +63,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
   end
 
   defp protocol_result(conn, request, result, kind, runtime, base) do
-    case ProtocolSchema.validate(kind, result) do
+    case ProtocolSchema.validate(kind, result, runtime.cache, runtime.cache_options) do
       :ok ->
         case Wire.result(conn, 200, request.request_id, result, ok_meta(base, request), runtime) do
           {:ok, reply} -> reply

@@ -115,7 +115,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     with :ok <- Response.validate(response),
          :ok <- structured(module, response, runtime),
          result = Response.encode(response) |> Wire.merge_meta(Result.metadata(runtime.server)),
-         :ok <- protocol_result(result),
+         :ok <- protocol_result(result, runtime),
          {:ok, reply} <-
            Wire.result(
              conn,
@@ -146,8 +146,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     end
   end
 
-  defp protocol_result(result) do
-    case ProtocolSchema.validate(:call_tool_result, result) do
+  defp protocol_result(result, runtime) do
+    case ProtocolSchema.validate(
+           :call_tool_result,
+           result,
+           runtime.cache,
+           runtime.cache_options
+         ) do
       :ok -> :ok
       {:error, _details} -> {:error, :invalid_protocol_result}
     end

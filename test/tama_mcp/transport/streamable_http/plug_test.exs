@@ -19,6 +19,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
   @header_mismatch Protocol.error_code(:header_mismatch)
   @unsupported Protocol.error_code(:unsupported_protocol_version)
 
+  defmodule Cache do
+    @moduledoc false
+
+    @behaviour TamaMCP.Cache
+
+    @impl true
+    def fetch(_key, _loader, _options), do: {:error, %{secret: "must not leak"}}
+  end
+
   setup do
     runtime =
       Plug.init(
@@ -55,6 +64,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 200
       assert %{"id" => "", "jsonrpc" => "2.0", "result" => _result} = decode(conn)
+    end
+
+    test "returns a bounded internal error when the validator cache fails" do
+      runtime =
+        Plug.init(
+          server: TamaMCP.TestSupport.Server,
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: Cache
+        )
+
+      {conn, log} =
+        with_log(fn -> post(runtime, Protocol.method(:server_discover), %{}) end)
+
+      assert conn.status == 500
+      assert %{"error" => %{"code" => @internal, "message" => "Internal error"}} = decode(conn)
+      refute conn.resp_body =~ "must not leak"
+      refute log =~ "must not leak"
     end
   end
 

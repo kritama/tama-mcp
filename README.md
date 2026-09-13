@@ -34,9 +34,9 @@ Codex / OpenCode / Pi
   protocol responses, cache keys and compiled validator artifacts, and the
   future Tasks and subscription adapter contracts.
 - `TamaOAuth` owns reusable OAuth and protected-resource protocol mechanics.
-- Tama owns identities, authorization policy, rate limits, the tool-validator
-  cache engine, Ecto persistence, durable execution, task transitions, and
-  graph results.
+- Tama owns identities, authorization policy, rate limits, the validator cache
+  engine, Ecto persistence, durable execution, task transitions, and graph
+  results.
 - Tama Link owns client compatibility, OAuth client behavior, local
   correlation, polling recovery, and downstream progress presentation.
 
@@ -109,11 +109,11 @@ and explicit application assigns. Authentication runs once before transport
 validation on every HTTP request.
 
 The cache adapter implements `TamaMCP.Cache`. TamaMCP compiles tool validators
-while compiling each tool module, embeds their serialized artifacts, and owns
-versioned cache keys and restoration. The host adapter owns storage,
-concurrency, expiry, distribution, and any additional serialization required by
-its cache engine. Cached validator values are opaque Erlang terms and may
-contain functions.
+while compiling each tool module, precompiles its fixed protocol validators,
+embeds their serialized artifacts, and owns versioned cache keys and
+restoration. The host adapter owns storage, concurrency, expiry, distribution,
+and any additional serialization required by its cache engine. Cached validator
+values are opaque Erlang terms and may contain functions.
 
 ## Conformance
 
@@ -124,20 +124,20 @@ tool errors, malformed metadata, scope denial, standard and schema-declared
 header agreement, unsupported versions, explicit null output, output-schema
 failure, and rejection of protocol sessions.
 
-Host applications can call `TamaMCP.Conformance.validate/2` for individual
-values or `TamaMCP.Conformance.run/2` with a request callback and an application
-fixture set.
+Host applications can call `TamaMCP.Conformance.validate/3` for individual
+values or `TamaMCP.Conformance.run/3` with a request callback, their cache
+adapter, and an application fixture set.
 
 ## Dependencies
 
 - `jason` encodes and decodes JSON.
 - `plug` provides the framework-neutral HTTP boundary.
-- `jsonschex` validates JSON Schema Draft 2020-12 tool contracts.
+- `jsonschex` validates JSON Schema Draft 2020-12 tool and protocol contracts.
 - `tama_oauth` supplies OAuth and protected-resource protocol primitives.
 - `telemetry` exposes bounded runtime instrumentation.
 
 The library deliberately does not depend on Phoenix, Ecto, Bandit, Cowboy,
-Anubis MCP, ex_mcp, or a tool-validator cache engine.
+Anubis MCP, ex_mcp, or a validator cache engine.
 
 ## Installation
 

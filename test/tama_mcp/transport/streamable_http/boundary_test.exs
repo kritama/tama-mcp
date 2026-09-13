@@ -4,7 +4,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
   use ExUnit.Case, async: true
 
   alias TamaMCP.Protocol
-  alias TamaMCP.Transport.StreamableHTTP.{Body, Headers, Request}
+  alias TamaMCP.Transport.StreamableHTTP.{Body, Headers, Request, Runtime}
 
   defmodule Adapter do
     @moduledoc false
@@ -174,7 +174,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
 
     for body <- invalid do
       assert {:error, %TamaMCP.Error{}, _status, _id, _conn} =
-               Request.validate(valid_conn, body, TamaMCP.TestSupport.Server)
+               Request.validate(valid_conn, body, runtime())
     end
   end
 
@@ -194,10 +194,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
       )
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
-             Request.validate(valid_conn, encode(missing_version), TamaMCP.TestSupport.Server)
+             Request.validate(valid_conn, encode(missing_version), runtime())
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
-             Request.validate(valid_conn, encode(invalid_info), TamaMCP.TestSupport.Server)
+             Request.validate(valid_conn, encode(invalid_info), runtime())
   end
 
   test "request parsing accepts empty client information strings" do
@@ -207,7 +207,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
     request = envelope(method, params(%{Protocol.meta_key(:client_info) => info}))
 
     assert {:ok, %Request{client_info: ^info}, _conn} =
-             Request.validate(valid_conn, encode(request), TamaMCP.TestSupport.Server)
+             Request.validate(valid_conn, encode(request), runtime())
   end
 
   test "request parsing rejects invalid protocol metadata key names" do
@@ -216,10 +216,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.BoundaryTest do
     invalid = envelope(method, params(%{"bad key" => true}))
 
     assert {:error, %TamaMCP.Error{}, 400, 1, _conn} =
-             Request.validate(valid_conn, encode(invalid), TamaMCP.TestSupport.Server)
+             Request.validate(valid_conn, encode(invalid), runtime())
   end
 
   defp conn(headers), do: %{Plug.Test.conn(:post, "/", "") | req_headers: headers}
+
+  defp runtime do
+    Runtime.build(
+      server: TamaMCP.TestSupport.Server,
+      authorization: TamaMCP.TestSupport.Authorization,
+      cache: TamaMCP.TestSupport.Cache
+    )
+  end
 
   defp adapter_conn(replies) do
     %{conn([]) | adapter: {Adapter, replies}}

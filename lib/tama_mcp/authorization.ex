@@ -14,7 +14,7 @@ defmodule TamaMCP.Authorization do
   after the decision, per tool, and fails with HTTP `403 Forbidden`.
   """
 
-  alias TamaMCP.Authorization.Decision
+  alias TamaMCP.Authorization.{Challenge, Decision}
 
   @type decision :: Decision.t()
 
@@ -62,7 +62,7 @@ defmodule TamaMCP.Authorization do
     end
 
     defp valid_scopes?(scopes) do
-      is_list(scopes) and Enum.all?(scopes, &(is_binary(&1) and &1 != "")) and
+      is_list(scopes) and Enum.all?(scopes, &Challenge.scope?/1) and
         length(scopes) == length(Enum.uniq(scopes))
     end
 

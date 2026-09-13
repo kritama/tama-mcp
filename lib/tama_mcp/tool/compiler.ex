@@ -1,6 +1,7 @@
 defmodule TamaMCP.Tool.Compiler do
   @moduledoc false
 
+  alias TamaMCP.Authorization.Challenge
   alias TamaMCP.Tool.Builder
 
   @task_policies [:disabled, :optional, :required]
@@ -35,7 +36,8 @@ defmodule TamaMCP.Tool.Compiler do
     scopes = Keyword.get(opts, :scopes, [])
 
     unless valid_scopes?(scopes) do
-      raise CompileError, description: "tool scopes must be a list of unique non-empty strings"
+      raise CompileError,
+        description: "tool scopes must be a list of unique valid OAuth scope tokens"
     end
 
     description = optional_string!(Keyword.get(opts, :description), "tool description")
@@ -135,7 +137,7 @@ defmodule TamaMCP.Tool.Compiler do
   end
 
   defp valid_scopes?(scopes) do
-    is_list(scopes) and Enum.all?(scopes, &(is_binary(&1) and &1 != "")) and
+    is_list(scopes) and Enum.all?(scopes, &Challenge.scope?/1) and
       length(scopes) == length(Enum.uniq(scopes))
   end
 

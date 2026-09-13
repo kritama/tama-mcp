@@ -3,7 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
 
   alias TamaMCP.{JSON, Protocol}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters}
+  alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters, Runtime}
 
   defstruct [
     :request_id,
@@ -37,13 +37,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     end
   end
 
-  @spec validate(Plug.Conn.t(), binary(), module()) :: {:ok, t(), Plug.Conn.t()} | failure()
-  def validate(conn, body, server) do
+  @spec validate(Plug.Conn.t(), binary(), Runtime.t()) :: {:ok, t(), Plug.Conn.t()} | failure()
+  def validate(conn, body, %Runtime{} = runtime) do
     with {:ok, json} <- decode(body),
          {:ok, request} <- parse(json),
-         :ok <- validate_schema(json, request.method),
+         :ok <- validate_schema(json, request.method, runtime),
          {:ok, request} <- Headers.match(conn, request),
-         :ok <- Parameters.match(conn, request, server) do
+         :ok <- Parameters.match(conn, request, runtime.server) do
       {:ok, request, conn}
     else
       {:error, error, id} -> {:error, error, TamaMCP.Error.status(error), id, conn}
@@ -188,13 +188,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     end
   end
 
-  defp validate_schema(json, method) do
+  defp validate_schema(json, method, runtime) do
     case request_schema(method) do
       nil ->
         :ok
 
       kind ->
-        case ProtocolSchema.validate(kind, json) do
+        case ProtocolSchema.validate(kind, json, runtime.cache, runtime.cache_options) do
           :ok ->
             :ok
 

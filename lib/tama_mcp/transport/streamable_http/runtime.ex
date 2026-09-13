@@ -16,6 +16,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     max_schema_bytes: 262_144,
     max_tools_per_server: 256,
     max_error_data_bytes: 8_192,
+    max_www_authenticate_bytes: 4_096,
     max_safe_metadata_bytes: 16_384
   }
 

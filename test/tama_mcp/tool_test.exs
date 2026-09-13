@@ -423,6 +423,20 @@ defmodule TamaMCP.ToolTest do
     end
   end
 
+  test "tool declarations reject invalid OAuth scope tokens" do
+    assert_raise CompileError, ~r/valid OAuth scope tokens/, fn ->
+      Code.compile_string(
+        """
+        defmodule TamaMCP.ToolTest.InvalidScope do
+          use TamaMCP.Tool, scopes: ["bad scope"]
+          def call(_input, _context), do: :ok
+        end
+        """,
+        "tool_test_invalid_scope.exs"
+      )
+    end
+  end
+
   test "validator cache refreshes when a tool module is recompiled" do
     module = TamaMCP.ToolTest.Reloaded
     original = Code.compiler_options()
