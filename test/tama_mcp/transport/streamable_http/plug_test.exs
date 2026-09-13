@@ -174,6 +174,69 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"result" => %{"resultType" => "complete"}} = decode(conn)
     end
 
+    test "compares mirrored integer headers exactly and numerically", %{runtime: runtime} do
+      for {body, shard} <- [
+            {42, "42.0"},
+            {42, "4.2e1"},
+            {42, "=?base64?#{Base.encode64("42.0")}?="},
+            {-42, "-42.0"},
+            {0, "-0.0e999"}
+          ] do
+        conn =
+          post(
+            runtime,
+            Protocol.method(:tools_call),
+            %{
+              "name" => "headers",
+              "arguments" => %{
+                "enabled" => true,
+                "region" => "west",
+                "routing" => %{"shard" => body}
+              }
+            },
+            headers: [
+              {"mcp-name", "headers"},
+              {"mcp-param-enabled", "true"},
+              {"mcp-param-region", "west"},
+              {"mcp-param-shard", shard}
+            ]
+          )
+
+        assert conn.status == 200
+        assert %{"result" => %{"resultType" => "complete"}} = decode(conn)
+      end
+
+      for {body, shard} <- [
+            {42, "42.5"},
+            {42, "-42.0"},
+            {42, "42trailing"},
+            {9_007_199_254_740_991, "9007199254740991.4"}
+          ] do
+        conn =
+          post(
+            runtime,
+            Protocol.method(:tools_call),
+            %{
+              "name" => "headers",
+              "arguments" => %{
+                "enabled" => true,
+                "region" => "west",
+                "routing" => %{"shard" => body}
+              }
+            },
+            headers: [
+              {"mcp-name", "headers"},
+              {"mcp-param-enabled", "true"},
+              {"mcp-param-region", "west"},
+              {"mcp-param-shard", shard}
+            ]
+          )
+
+        assert conn.status == 400
+        assert %{"error" => %{"code" => @header_mismatch}} = decode(conn)
+      end
+    end
+
     test "rejects missing, mismatched, duplicate, and unexpected parameter headers", %{
       runtime: runtime
     } do

@@ -325,6 +325,8 @@ The endpoint accepts HTTP POST for supported JSON-RPC requests. It must enforce:
 - `MCP-Protocol-Version: 2026-07-28`;
 - required `Mcp-Method` and conditional `Mcp-Name` headers;
 - exact agreement between standard headers and the JSON-RPC body;
+- agreement between schema-declared `Mcp-Param-*` headers and tool arguments,
+  comparing integer values numerically within the IEEE-754 safe range;
 - required per-request protocol metadata and client capabilities;
 - request identifier type and JSON-RPC version; and
 - an authorization decision on every request.
@@ -353,6 +355,10 @@ Mcp-Method: <body method>
 `params.name`, and for `tasks/get`, `tasks/update`, and `tasks/cancel`, where it
 equals `params.taskId`. All standard header values must agree exactly with
 their body sources after applying the pinned Base64 sentinel decoding rules.
+Schema-declared string and boolean parameter headers use the same exact
+comparison. Integer parameter headers are parsed as decimal numbers and
+compared exactly to the body integer so equivalent representations such as
+`42.0` and `42` agree without introducing floating-point rounding aliases.
 
 Every request `params` object includes:
 

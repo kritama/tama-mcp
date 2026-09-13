@@ -23,7 +23,10 @@ defmodule TamaMCP.Cache.Validator do
 
   @spec fetch(artifact(), module(), keyword()) :: Schema.compiled()
   def fetch({key, encoded}, cache, cache_options) do
-    loader = fn -> :erlang.binary_to_term(encoded, [:safe]) end
+    # These bytes are produced during compilation and embedded in the caller's
+    # BEAM file. The cache adapter never supplies serialized input to this
+    # boundary; it only decides whether to invoke the trusted loader.
+    loader = fn -> :erlang.binary_to_term(encoded) end
 
     case cache.fetch(key, loader, cache_options) do
       {:ok, compiled} -> compiled
