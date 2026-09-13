@@ -28,7 +28,7 @@ The project follows Semantic Versioning and uses Conventional Commits.
   adapter data from entering unbounded transport errors or telemetry.
 - Validate complete method-specific requests and schema-declared
   `Mcp-Param-*` header agreement before tool execution, including exact numeric
-  comparison of equivalent integer representations.
+  comparison of equivalent integer representations in headers and JSON bodies.
 - Bound every encoded successful result and reject adapter-specific structs
   from public response and error data.
 - Accept empty raw output schemas while rejecting explicitly declared JSON

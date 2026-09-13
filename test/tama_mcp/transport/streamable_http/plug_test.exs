@@ -180,7 +180,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
             {42, "4.2e1"},
             {42, "=?base64?#{Base.encode64("42.0")}?="},
             {-42, "-42.0"},
-            {0, "-0.0e999"}
+            {0, "-0.0e999"},
+            {42.0, "42"},
+            {-42.0, "-42"},
+            {-0.0, "0"}
           ] do
         conn =
           post(

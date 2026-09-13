@@ -79,7 +79,19 @@ defmodule TamaMCP.Transport.StreamableHTTP.Parameters do
               value <= @maximum_safe_integer,
        do: {:ok, value}
 
-  defp comparable(value, "integer") when is_integer(value),
+  defp comparable(value, "integer")
+       when is_float(value) and value >= -@maximum_safe_integer and
+              value <= @maximum_safe_integer do
+    integer = trunc(value)
+
+    if value == integer do
+      {:ok, integer}
+    else
+      {:error, "body value is not an integer"}
+    end
+  end
+
+  defp comparable(value, "integer") when is_number(value),
     do: {:error, "integer is outside the IEEE-754 safe range"}
 
   defp comparable(_value, type), do: {:error, "body value is not a #{type}"}

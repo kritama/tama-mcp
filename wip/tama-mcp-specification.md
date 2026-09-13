@@ -357,8 +357,10 @@ equals `params.taskId`. All standard header values must agree exactly with
 their body sources after applying the pinned Base64 sentinel decoding rules.
 Schema-declared string and boolean parameter headers use the same exact
 comparison. Integer parameter headers are parsed as decimal numbers and
-compared exactly to the body integer so equivalent representations such as
-`42.0` and `42` agree without introducing floating-point rounding aliases.
+compared exactly to the body integer, including when the JSON decoder represents
+a mathematically integral body value as a float. Equivalent representations
+such as `42.0` and `42` agree without introducing floating-point rounding
+aliases.
 
 Every request `params` object includes:
 
