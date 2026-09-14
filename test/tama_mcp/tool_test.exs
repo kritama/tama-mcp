@@ -146,6 +146,30 @@ defmodule TamaMCP.ToolTest do
                TamaMCP.Schema.validate(TamaMCP.Tool.output_validator(mod, Cache), %{"ok" => true})
     end
 
+    test "raw schemas reject non-JSON values and keys" do
+      invalid = [
+        {"raw_input_schema", %{"type" => "object", "const" => :ok}},
+        {"raw_output_schema", %{type: "object"}}
+      ]
+
+      for {declaration, schema} <- invalid do
+        suffix = System.unique_integer([:positive])
+
+        assert_raise CompileError, ~r/#{declaration}\/1 expects a JSON-safe schema map/, fn ->
+          Code.compile_string(
+            """
+            defmodule TamaMCP.ToolTest.InvalidRawSchema#{suffix} do
+              use TamaMCP.Tool
+              #{declaration}(#{inspect(schema)})
+              def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+            end
+            """,
+            "tool_test_invalid_raw_schema_#{suffix}.exs"
+          )
+        end
+      end
+    end
+
     test "raw input schemas compile statically reachable parameter headers" do
       headers = Headers.parameter_headers()
 

@@ -1,7 +1,7 @@
 defmodule TamaMCP.Tool.Compiler do
   @moduledoc false
 
-  alias TamaMCP.Authorization.Challenge
+  alias TamaMCP.{Authorization.Challenge, JSON}
   alias TamaMCP.Tool.Builder
 
   @task_policies [:disabled, :optional, :required]
@@ -73,7 +73,14 @@ defmodule TamaMCP.Tool.Compiler do
   def literal_schema!(expr, name, caller) do
     case literal_value!(expr, caller, "#{name} schema") do
       map when is_map(map) ->
-        map
+        if JSON.value?(map) do
+          map
+        else
+          raise compile_error(
+                  caller,
+                  "#{name}/1 expects a JSON-safe schema map with UTF-8 string keys"
+                )
+        end
 
       other ->
         raise compile_error(

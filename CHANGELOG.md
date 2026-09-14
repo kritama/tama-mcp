@@ -32,7 +32,7 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Bound every encoded successful result and reject adapter-specific structs
   from public response and error data.
 - Accept empty raw output schemas while rejecting explicitly declared JSON
-  Schema dialects other than Draft 2020-12.
+  Schema dialects other than Draft 2020-12 and non-JSON raw schema terms.
 - Normalize authorization exits and throws without exposing adapter failure
   details.
 - Tie synchronous tool workers to their request lifetime and execution deadline.
