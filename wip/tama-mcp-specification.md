@@ -1,6 +1,6 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: implementation handoff
+Status: Phase 1 implemented; Phases 2-5 pending
 
 This document is the authoritative design contract for the first complete
 `tama_mcp` implementation. It defines the package boundary, supported protocol,
@@ -140,9 +140,9 @@ Tama authorization, durable task rows, PubSub, graph execution
 
 | Component | Owns |
 | --- | --- |
-| TamaMCP | MCP wire protocol, JSON-RPC, schemas, DSL, request context, task protocol state, subscription streams, adapter behaviours |
+| TamaMCP | MCP wire protocol, JSON-RPC, schemas, DSL, validator artifacts and cache keys, request context, task protocol state, subscription streams, adapter behaviours |
 | TamaOAuth | OAuth and protected-resource protocol mechanics |
-| Tama | issuer/resource policy, principals, scopes, origins, rate limits, Ecto persistence, graph execution, durable results |
+| Tama | issuer/resource policy, principals, scopes, origins, rate limits, validator cache engine, Ecto persistence, graph execution, durable results |
 | Tama Link | OAuth client behavior, upstream task correlation, polling recovery, downstream compatibility and progress presentation |
 
 TamaMCP may depend on TamaOAuth. TamaOAuth must not depend on TamaMCP. Neither
@@ -155,6 +155,7 @@ The intended module layout is:
 ```text
 TamaMCP
 TamaMCP.Authorization
+TamaMCP.Cache
 TamaMCP.Clock
 TamaMCP.Context
 TamaMCP.Error
@@ -246,8 +247,10 @@ The tool callback contract is:
 `CallToolResult.isError` is `true`; this remains a completed task when executed
 asynchronously. `{:error, Error.t()}` represents a JSON-RPC execution failure
 and maps an asynchronous task to `failed`. Expected tool and domain failures do
-not raise. Unexpected exceptions are caught by the outer runtime boundary and
-converted to a redacted internal error.
+not raise. Unexpected exceptions, exits, and throws are caught by the outer
+runtime boundary and converted to a redacted internal error. A synchronous tool
+worker is tied to the request process lifetime and its configured execution
+deadline; terminating either boundary terminates the worker.
 
 Durable task creation is not a tool callback return variant. The runtime selects
 synchronous or task execution from the tool's task policy and the capabilities
@@ -263,11 +266,19 @@ The DSL is an ergonomic builder for ordinary JSON Schema Draft 2020-12 maps.
 Every tool must also support a raw-schema escape hatch so the DSL cannot block
 use of a valid schema keyword. Generated schemas must default object contracts
 to `additionalProperties: false` unless the tool explicitly opts into unknown
-keys.
+keys. Every assembled schema must recursively contain only JSON values and
+UTF-8 string map keys, including schemas nested through raw field types, so the
+compiled validator and advertised schema cannot diverge during JSON encoding.
 
-Schemas must be compiled once and reused. Invalid schemas fail during server
-startup or compilation rather than on the first request. Runtime input and
-structured output are validated using `jsonschex`.
+Schemas must be compiled once and reused. Tool compilation validates each tool
+schema, and TamaMCP compilation validates each fixed vendored protocol schema.
+Both paths embed serialized compiled-validator artifacts so schema compilation
+never occurs in a request process. TamaMCP owns versioned cache keys,
+restoration, and validation semantics. A required application-supplied
+`TamaMCP.Cache` adapter owns storage, concurrency, expiry, distribution, and
+any engine-specific serialization. Invalid schemas fail during compilation
+rather than on the first request. Runtime input, structured output, and wire
+values are validated using `jsonschex`.
 
 Tool annotations must be declared explicitly and emitted unchanged after
 validation. TamaMCP must not infer destructive, idempotent, read-only, or
@@ -287,7 +298,8 @@ request-scoped data:
 - bounded request headers selected by the transport;
 - remote address supplied by the host application;
 - task identifier when executing as a durable task; and
-- application assigns supplied by configured adapters.
+- application assigns explicitly supplied by the configured authorization
+  adapter in its normalized decision.
 
 Context must survive transfer into asynchronous task execution. This is a
 security invariant: authorization claims, scopes, request identity, and the
@@ -315,6 +327,8 @@ The endpoint accepts HTTP POST for supported JSON-RPC requests. It must enforce:
 - `MCP-Protocol-Version: 2026-07-28`;
 - required `Mcp-Method` and conditional `Mcp-Name` headers;
 - exact agreement between standard headers and the JSON-RPC body;
+- agreement between schema-declared `Mcp-Param-*` headers and tool arguments,
+  comparing integer values numerically within the IEEE-754 safe range;
 - required per-request protocol metadata and client capabilities;
 - request identifier type and JSON-RPC version; and
 - an authorization decision on every request.
@@ -343,6 +357,12 @@ Mcp-Method: <body method>
 `params.name`, and for `tasks/get`, `tasks/update`, and `tasks/cancel`, where it
 equals `params.taskId`. All standard header values must agree exactly with
 their body sources after applying the pinned Base64 sentinel decoding rules.
+Schema-declared string and boolean parameter headers use the same exact
+comparison. Integer parameter headers are parsed as decimal numbers and
+compared exactly to the body integer, including when the JSON decoder represents
+a mathematically integral body value as a float. Equivalent representations
+such as `42.0` and `42` agree without introducing floating-point rounding
+aliases.
 
 Every request `params` object includes:
 
@@ -1022,6 +1042,11 @@ Tama owns:
 TamaMCP must not accept identity from an unvalidated request field. It derives
 authorization only from the configured adapter result.
 
+Tool scopes must be valid OAuth scope tokens. Transport initialization must
+reject a catalog whose complete insufficient-scope challenge exceeds the
+configured `max_www_authenticate_bytes`; TamaMCP must not truncate the required
+scope set or emit an unbounded `WWW-Authenticate` value.
+
 Protected-resource metadata remains a Tama web route composed with TamaOAuth.
 It is not hidden inside the MCP transport Plug.
 
@@ -1037,8 +1062,9 @@ parse, invalid request, method not found, invalid params, internal error,
 unsupported protocol version, header mismatch, and missing capability errors.
 
 Expected client, authorization, task-state, and domain failures return values;
-they do not raise. Unexpected exceptions are captured at the outer runtime
-boundary, logged with redaction, and returned as a generic internal error.
+they do not raise. Unexpected exceptions, exits, and throws are captured at the
+outer runtime boundary, logged with redaction, and returned as a generic
+internal error.
 
 All encoded maps must be JSON-safe. Adapter structs, exceptions, changesets,
 PIDs, references, and stack traces must never be serialized to clients.
@@ -1052,6 +1078,7 @@ Server configuration is explicit and validated once. It includes:
 - request and stream timeouts;
 - maximum body and schema sizes;
 - authorization adapter and options;
+- validator cache adapter and options;
 - task store and options;
 - task runner and options;
 - notification bus and options;
@@ -1068,6 +1095,7 @@ The initial production defaults are:
 | `max_body_bytes` | `1_048_576` | maximum encoded UTF-8 request body |
 | `body_read_timeout_ms` | `5_000` | maximum time spent reading the request body |
 | `request_timeout_ms` | `30_000` | synchronous tool execution deadline |
+| `max_result_bytes` | `1_048_576` | maximum encoded successful JSON-RPC result |
 | `max_schema_bytes` | `262_144` | maximum canonical JSON size of each input or output schema |
 | `max_tools_per_server` | `256` | maximum registered tool definitions |
 | `default_task_ttl_ms` | `86_400_000` | default task lifetime of 24 hours |
@@ -1080,6 +1108,7 @@ The initial production defaults are:
 | `stream_max_lifetime_ms` | `3_600_000` | maximum stream lifetime before graceful reconnect |
 | `max_status_message_bytes` | `2_048` | maximum encoded task status message |
 | `max_error_data_bytes` | `8_192` | maximum encoded public error data |
+| `max_www_authenticate_bytes` | `4_096` | maximum encoded `WWW-Authenticate` response-header value |
 | `max_safe_metadata_bytes` | `16_384` | maximum encoded selected context/telemetry metadata |
 
 All sizes are measured after UTF-8 or canonical JSON encoding as applicable.
@@ -1183,7 +1212,11 @@ and expired credentials.
 - compile-time server and tool DSL macros;
 - Draft 2020-12 schema compilation and validation;
 - stateless HTTP Plug, headers, JSON-RPC, and discovery; and
-- synchronous System MCP tools and contract tests.
+- synchronous tool execution and package-provided protocol contract tests.
+
+The concrete Tama System tool modules remain application-owned and migrate to
+this runtime in Phase 4. Phase 1 proves the reusable synchronous execution
+contract without introducing a dependency from TamaMCP back to Tama.
 
 ### Phase 2: durable Tasks extension
 
@@ -1264,8 +1297,11 @@ Runtime dependencies are intentionally small:
 - `telemetry` for instrumentation.
 
 TamaMCP must not add a web server, database, queue, Phoenix, or another MCP
-implementation as a transitive runtime dependency. New dependencies require an
-ownership, maintenance, security, and release assessment.
+implementation as a transitive runtime dependency. It must not select or depend
+on a validator cache engine; the host application supplies one through
+`TamaMCP.Cache`.
+New dependencies require an ownership, maintenance, security, and release
+assessment.
 
 ## 23. Branching and delivery
 

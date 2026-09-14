@@ -10,6 +10,7 @@ defmodule TamaMCP.MixProject do
       version: @version,
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       description: description(),
       source_url: @source_url,
@@ -17,9 +18,13 @@ defmodule TamaMCP.MixProject do
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
+      test_coverage: [ignore_modules: [~r/^TamaMCP\.TestSupport\./]],
       aliases: aliases()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   def application do
     [
@@ -37,7 +42,8 @@ defmodule TamaMCP.MixProject do
 
   defp package do
     [
-      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE),
+      files:
+        ~w(lib test/fixtures/protocol/2026-07-28 .formatter.exs mix.exs README.md CHANGELOG.md LICENSE priv/protocol),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
     ]
@@ -77,7 +83,7 @@ defmodule TamaMCP.MixProject do
         "format --check-formatted",
         "compile --warnings-as-errors",
         "credo --strict",
-        "test"
+        "test --cover"
       ]
     ]
   end
