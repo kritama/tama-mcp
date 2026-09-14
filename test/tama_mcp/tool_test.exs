@@ -154,8 +154,9 @@ defmodule TamaMCP.ToolTest do
 
       for {declaration, schema} <- invalid do
         suffix = System.unique_integer([:positive])
+        kind = if declaration == "raw_input_schema", do: "input", else: "output"
 
-        assert_raise CompileError, ~r/#{declaration}\/1 expects a JSON-safe schema map/, fn ->
+        assert_raise CompileError, ~r/invalid #{kind} schema: JSON Schema must contain/, fn ->
           Code.compile_string(
             """
             defmodule TamaMCP.ToolTest.InvalidRawSchema#{suffix} do
@@ -336,6 +337,19 @@ defmodule TamaMCP.ToolTest do
 
       assert_raise CompileError, ~r/unsupported JSON Schema dialect.*Draft 2020-12 only/, fn ->
         compile_raw_tool(schema)
+      end
+    end
+
+    test "rejects non-JSON values in nested raw field schemas" do
+      fields = [
+        {"NestedRaw", ~s|field(:value, {:raw, %{"const" => :ok}})|},
+        {"ArrayNestedRaw", ~s|field(:values, {:array, {:raw, %{"const" => :ok}}})|}
+      ]
+
+      for {suffix, field} <- fields do
+        assert_raise CompileError, ~r/invalid input schema: JSON Schema must contain/, fn ->
+          compile_tool(suffix, field)
+        end
       end
     end
 

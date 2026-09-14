@@ -266,9 +266,9 @@ The DSL is an ergonomic builder for ordinary JSON Schema Draft 2020-12 maps.
 Every tool must also support a raw-schema escape hatch so the DSL cannot block
 use of a valid schema keyword. Generated schemas must default object contracts
 to `additionalProperties: false` unless the tool explicitly opts into unknown
-keys. Raw schemas must recursively contain only JSON values and UTF-8 string
-map keys so the compiled validator and advertised schema cannot diverge during
-JSON encoding.
+keys. Every assembled schema must recursively contain only JSON values and
+UTF-8 string map keys, including schemas nested through raw field types, so the
+compiled validator and advertised schema cannot diverge during JSON encoding.
 
 Schemas must be compiled once and reused. Tool compilation validates each tool
 schema, and TamaMCP compilation validates each fixed vendored protocol schema.

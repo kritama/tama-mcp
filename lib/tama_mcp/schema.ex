@@ -7,6 +7,7 @@ defmodule TamaMCP.Schema do
   # validator directly. Schemas are compiled once and reused.
 
   alias __MODULE__.Walker
+  alias TamaMCP.JSON
 
   @type compiled :: term()
 
@@ -28,11 +29,20 @@ defmodule TamaMCP.Schema do
   """
   @spec compile(map()) :: {:ok, compiled()} | {:error, String.t()}
   def compile(schema) when is_map(schema) do
-    with :ok <- validate_dialects(schema) do
+    with :ok <- validate_json(schema),
+         :ok <- validate_dialects(schema) do
       case JSONSchex.compile(schema) do
         {:ok, compiled} -> {:ok, compiled}
         {:error, reason} -> {:error, format_compile_error(reason)}
       end
+    end
+  end
+
+  defp validate_json(schema) do
+    if JSON.value?(schema) do
+      :ok
+    else
+      {:error, "JSON Schema must contain only JSON values and UTF-8 string keys"}
     end
   end
 

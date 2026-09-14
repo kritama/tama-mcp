@@ -15,6 +15,18 @@ defmodule TamaMCP.SchemaTest do
     assert reason =~ "invalid JSON schema"
   end
 
+  test "rejects non-JSON terms anywhere in a schema" do
+    invalid = [
+      %{"type" => "object", "const" => :ok},
+      %{"type" => "object", "properties" => %{"value" => %{type: "string"}}}
+    ]
+
+    for schema <- invalid do
+      assert {:error, reason} = Schema.compile(schema)
+      assert reason == "JSON Schema must contain only JSON values and UTF-8 string keys"
+    end
+  end
+
   test "accepts Draft 2020-12 schemas and rejects unsupported explicit dialects" do
     for dialect <- [
           "https://json-schema.org/draft/2020-12/schema",
