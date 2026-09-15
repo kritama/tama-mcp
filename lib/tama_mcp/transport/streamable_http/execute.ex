@@ -223,6 +223,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       method: request.method,
       request_id: request.request_id,
       original_params: request.params,
+      client_capabilities: request.client_capabilities,
       created_at: now,
       ttl_ms: runtime.limits.default_task_ttl_ms,
       poll_interval_ms: runtime.limits.default_poll_interval_ms,
@@ -249,7 +250,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       last_updated_at: generated[:created_at],
       ttl_ms: generated[:ttl_ms],
       poll_interval_ms: generated[:poll_interval_ms],
-      original_params: request.params
+      original_params: request.params,
+      client_capabilities: request.client_capabilities
     }
 
     if TaskValidation.matches?(task, expected) do
@@ -298,7 +300,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       :request_id,
       :created_at,
       :ttl_ms,
-      :original_params
+      :original_params,
+      :client_capabilities
     ])
   end
 

@@ -146,7 +146,8 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
           last_updated_at: generated[:created_at],
           ttl_ms: generated[:ttl_ms],
           poll_interval_ms: generated[:poll_interval_ms],
-          original_params: generated[:original_params]
+          original_params: generated[:original_params],
+          client_capabilities: generated[:client_capabilities]
         },
         generated[:task_validation_options]
       )

@@ -26,6 +26,7 @@ defmodule TamaMCP.Task.Validation do
           | {:utc_datetime, atom()}
           | {:struct, atom(), module()}
           | {:schema, source(), module(), atom()}
+          | {:supported_input_requests, atom(), atom()}
           | {:recorded_keys, atom(), atom()}
           | {:tool_output, atom()}
 
@@ -185,6 +186,16 @@ defmodule TamaMCP.Task.Validation do
       ) == :ok
   end
 
+  defp check(validation, {:supported_input_requests, requests_field, capabilities_field}) do
+    requests = value(validation, requests_field)
+    capabilities = value(validation, capabilities_field)
+
+    is_map(requests) and is_map(capabilities) and
+      Enum.all?(requests, fn {_key, request} ->
+        input_request_supported?(request, capabilities)
+      end)
+  end
+
   defp check(validation, {:recorded_keys, requests_field, keys_field}) do
     requests = value(validation, requests_field)
     keys = value(validation, keys_field)
@@ -210,6 +221,44 @@ defmodule TamaMCP.Task.Validation do
   end
 
   defp check(_validation, {:tool_output, _field}), do: false
+
+  defp input_request_supported?(
+         %{"method" => "elicitation/create", "params" => params},
+         capabilities
+       )
+       when is_map(params) do
+    mode = Map.get(params, "mode", "form")
+
+    case Map.get(capabilities, "elicitation") do
+      %{} = elicitation ->
+        is_map(Map.get(elicitation, mode)) or (mode == "form" and map_size(elicitation) == 0)
+
+      _unsupported ->
+        false
+    end
+  end
+
+  defp input_request_supported?(
+         %{"method" => "sampling/createMessage", "params" => params},
+         capabilities
+       )
+       when is_map(params) do
+    case Map.get(capabilities, "sampling") do
+      %{} = sampling ->
+        not sampling_tool_use?(params) or is_map(Map.get(sampling, "tools"))
+
+      _unsupported ->
+        false
+    end
+  end
+
+  defp input_request_supported?(%{"method" => "roots/list"}, capabilities),
+    do: is_map(Map.get(capabilities, "roots"))
+
+  defp input_request_supported?(_request, _capabilities), do: false
+
+  defp sampling_tool_use?(params),
+    do: Map.has_key?(params, "tools") or Map.has_key?(params, "toolChoice")
 
   defp value(%__MODULE__{} = validation, {:encoded_error, field}) do
     validation.task

@@ -317,6 +317,97 @@ defmodule TamaMCP.TaskTest do
              )
   end
 
+  test "rejects input requests unsupported by the originating client capabilities" do
+    tasks_only = %{task() | client_capabilities: tasks_capability()}
+
+    unsupported = [
+      elicitation_request(),
+      roots_request(),
+      sampling_request(),
+      sampling_request(%{"tools" => [sampling_tool()]})
+    ]
+
+    for {request, offset} <- Enum.with_index(unsupported, 1) do
+      assert {:error, :invalid_task} =
+               Task.transition(
+                 tasks_only,
+                 :input_required,
+                 %{
+                   input_requests: %{"request-#{offset}" => request},
+                   last_updated_at: later(offset)
+                 },
+                 validation_options()
+               )
+    end
+
+    form_only = %{task() | client_capabilities: Map.put(tasks_capability(), "elicitation", %{})}
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               form_only,
+               :input_required,
+               %{input_requests: %{"url" => url_elicitation_request()}, last_updated_at: @later},
+               validation_options()
+             )
+
+    sampling_without_tools = %{
+      task()
+      | client_capabilities: Map.put(tasks_capability(), "sampling", %{})
+    }
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               sampling_without_tools,
+               :input_required,
+               %{
+                 input_requests: %{
+                   "sampling" => sampling_request(%{"toolChoice" => %{"mode" => "auto"}})
+                 },
+                 last_updated_at: @later
+               },
+               validation_options()
+             )
+  end
+
+  test "accepts every input request declared by the originating client" do
+    capabilities =
+      tasks_capability()
+      |> Map.put("elicitation", %{"url" => %{}})
+      |> Map.put("roots", %{})
+      |> Map.put("sampling", %{"tools" => %{}})
+
+    capable = %{task() | client_capabilities: capabilities}
+
+    requests = %{
+      "url" => url_elicitation_request(),
+      "roots" => roots_request(),
+      "sampling" => sampling_request(%{"tools" => [sampling_tool()]})
+    }
+
+    assert {:ok, %Task{status: :input_required, input_requests: ^requests}} =
+             Task.transition(
+               capable,
+               :input_required,
+               %{input_requests: requests, last_updated_at: @later},
+               validation_options()
+             )
+
+    implicit_form = %{
+      task()
+      | client_capabilities: Map.put(tasks_capability(), "elicitation", %{})
+    }
+
+    request = update_in(elicitation_request(), ["params"], &Map.delete(&1, "mode"))
+
+    assert {:ok, %Task{status: :input_required}} =
+             Task.transition(
+               implicit_form,
+               :input_required,
+               %{input_requests: %{"form" => request}, last_updated_at: @later},
+               validation_options()
+             )
+  end
+
   defp task do
     assert {:ok, task} = Task.new(attributes())
     task
@@ -332,7 +423,8 @@ defmodule TamaMCP.TaskTest do
       last_updated_at: @created,
       ttl_ms: 86_400_000,
       poll_interval_ms: 1_000,
-      original_params: %{"name" => "message", "arguments" => %{}}
+      original_params: %{"name" => "message", "arguments" => %{}},
+      client_capabilities: tasks_capability() |> Map.put("elicitation", %{"form" => %{}})
     }
   end
 
@@ -419,5 +511,46 @@ defmodule TamaMCP.TaskTest do
         }
       }
     }
+  end
+
+  defp url_elicitation_request do
+    %{
+      "method" => "elicitation/create",
+      "params" => %{
+        "message" => "Continue in the browser.",
+        "mode" => "url",
+        "url" => "https://example.com/continue"
+      }
+    }
+  end
+
+  defp roots_request, do: %{"method" => "roots/list", "params" => %{}}
+
+  defp sampling_request(extra_params \\ %{}) do
+    %{
+      "method" => "sampling/createMessage",
+      "params" =>
+        Map.merge(
+          %{
+            "messages" => [
+              %{"role" => "user", "content" => %{"type" => "text", "text" => "Hello"}}
+            ],
+            "maxTokens" => 100
+          },
+          extra_params
+        )
+    }
+  end
+
+  defp sampling_tool do
+    %{
+      "name" => "lookup",
+      "description" => "Look something up",
+      "inputSchema" => %{"type" => "object"}
+    }
+  end
+
+  defp tasks_capability do
+    %{"extensions" => %{TamaMCP.Protocol.tasks_extension() => %{}}}
   end
 end

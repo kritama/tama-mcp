@@ -23,7 +23,8 @@
             "_meta": {
               "io.modelcontextprotocol/protocolVersion": "2026-07-28",
               "io.modelcontextprotocol/clientCapabilities": {
-                "extensions": {"io.modelcontextprotocol/tasks": {}}
+                "extensions": {"io.modelcontextprotocol/tasks": {}},
+                "elicitation": {"form": {}}
               },
               "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
             },

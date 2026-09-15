@@ -109,7 +109,11 @@ defmodule TamaMCP.Task.StoreTest do
                created_at: @created,
                last_updated_at: @created,
                ttl_ms: 60_000,
-               original_params: %{"name" => "message", "arguments" => %{}}
+               original_params: %{"name" => "message", "arguments" => %{}},
+               client_capabilities: %{
+                 "extensions" => %{TamaMCP.Protocol.tasks_extension() => %{}},
+                 "elicitation" => %{"form" => %{}}
+               }
              })
 
     task

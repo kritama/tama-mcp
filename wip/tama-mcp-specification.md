@@ -899,10 +899,13 @@ promise or perform a transition to `cancelled`; the runner may still commit
 non-terminal task to `failed` with a bounded expiration error after its TTL.
 
 The task store must preserve timestamps, TTL, suggested polling interval,
-status message, original request correlation, and the state-specific result,
-error, or input requests required by the protocol. It must also preserve every
-issued input-request key for the task's lifetime and reject reuse after a key is
-no longer outstanding. The retained history is capped by
+status message, original request correlation, the originating request's client
+capabilities, and the state-specific result, error, or input requests required
+by the protocol. Before committing `input_required`, every input request must
+be supported by that capability snapshot, including the elicitation mode and
+sampling tool-use sub-capability. It must also preserve every issued
+input-request key for the task's lifetime and reject reuse after a key is no
+longer outstanding. The retained history is capped by
 `max_input_request_keys_per_task`; a transition that would exceed the cap is
 rejected before persistence.
 
@@ -936,15 +939,15 @@ reserved `:tama_mcp` adapter option. Stores must pass those validation options t
 `TamaMCP.Task.transition/4`; runners receive the same options for
 `TamaMCP.Task.new/2`. Task validation checks the complete encoded `tasks/get`
 result before a state commit. It also validates `input_required` payloads
-against the pinned `InputRequests` schema and `completed` payloads against the
-pinned core `CallToolResult` schema using the configured validator cache. This
-keeps explicitly raised or lowered runtime limits and protocol payload
-contracts consistent at construction, persistence, lookup, transition, and
-wire recovery boundaries. Failed transitions validate the safely encoded error
-against the pinned Tasks `Error` schema before persistence. Per-task validation
-options retain the originating tool so a completed result's
-`structuredContent` is also checked against its declared output schema before
-commit.
+against the pinned `InputRequests` schema and the persisted client capabilities,
+and validates `completed` payloads against the pinned core `CallToolResult`
+schema using the configured validator cache. This keeps explicitly raised or
+lowered runtime limits and protocol payload contracts consistent at
+construction, persistence, lookup, transition, and wire recovery boundaries.
+Failed transitions validate the safely encoded error against the pinned Tasks
+`Error` schema before persistence. Per-task validation options retain the
+originating tool so a completed result's `structuredContent` is also checked
+against its declared output schema before commit.
 
 ### 13.4 Task runner behaviour
 

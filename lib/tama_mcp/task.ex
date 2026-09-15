@@ -2,8 +2,9 @@ defmodule TamaMCP.Task do
   @moduledoc """
   TamaMCP-owned durable task value and transition rules.
 
-  Adapter-only fields such as `owner_key`, `original_params`, cancellation
-  intent, and `revision` are never encoded on the MCP wire.
+  Adapter-only fields such as `owner_key`, `original_params`,
+  `client_capabilities`, cancellation intent, and `revision` are never encoded
+  on the MCP wire.
   """
 
   alias TamaMCP.{Error, JSON, Protocol}
@@ -30,6 +31,7 @@ defmodule TamaMCP.Task do
       {:absent, :result},
       {:absent, :error},
       {:schema, :input_requests, TamaMCP.Schema.Tasks, :input_requests},
+      {:supported_input_requests, :input_requests, :client_capabilities},
       {:recorded_keys, :input_requests, :input_request_keys}
     ],
     completed: [
@@ -65,6 +67,7 @@ defmodule TamaMCP.Task do
     {:optional_bounded_positive_integer, :poll_interval_ms, @maximum_protocol_integer},
     {:optional_utf8_bytes, :status_message, {:option, :max_status_message_bytes, 2_048}},
     {:optional_json_object, :original_params},
+    {:json_object, :client_capabilities},
     {:unique_binary_list, :input_request_keys},
     {:max_items, :input_request_keys, {:option, :max_input_request_keys_per_task, 256}},
     {:boolean, :cancellation_requested},
@@ -76,6 +79,7 @@ defmodule TamaMCP.Task do
     :owner_key,
     :method,
     :request_id,
+    :client_capabilities,
     :status,
     :created_at,
     :last_updated_at,
@@ -96,6 +100,7 @@ defmodule TamaMCP.Task do
     :result,
     :error,
     :original_params,
+    :client_capabilities,
     input_request_keys: [],
     cancellation_requested: false,
     revision: 0
@@ -118,6 +123,7 @@ defmodule TamaMCP.Task do
           result: map() | nil,
           error: Error.t() | nil,
           original_params: map() | nil,
+          client_capabilities: map(),
           cancellation_requested: boolean(),
           revision: non_neg_integer()
         }

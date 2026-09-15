@@ -141,6 +141,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert context.headers == %{}
     assert generated[:clock] == TamaMCP.TestSupport.Tasks.Clock
     assert generated[:clock_options] == [now: @created]
+    assert generated[:client_capabilities] == context.client_capabilities
+    assert task.client_capabilities == context.client_capabilities
     assert {:ok, ^task} = Store.get("test-owner", task.id, agent: store)
 
     conn = post(runtime, Protocol.method(:tasks_get), %{"taskId" => task.id}, name: task.id)
@@ -288,6 +290,40 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert missing.status == 400
     assert get_in(decode(missing), ["error", "message"]) == "Task was not found"
+  end
+
+  test "store rejects input requests unsupported by the originating client", %{
+    runtime: runtime
+  } do
+    tasks_only = %{"extensions" => %{Protocol.tasks_extension() => %{}}}
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+        name: "task_required",
+        client_capabilities: tasks_only
+      )
+
+    assert conn.status == 200
+    assert_receive {:task_started, _, _, _, %Task{} = task, generated}
+    assert task.client_capabilities == tasks_only
+
+    assert {:error, :invalid_task} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :input_required,
+               %{
+                 input_requests: %{"approval" => elicitation_request()},
+                 last_updated_at: @later
+               },
+               generated[:task_store_options]
+             )
+
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, generated[:task_store_options])
   end
 
   test "tasks/cancel acknowledges cooperative intent without promising a state", %{
@@ -631,10 +667,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     extensions =
       if capabilities?, do: %{Protocol.tasks_extension() => %{}}, else: %{}
 
+    client_capabilities =
+      Keyword.get_lazy(options, :client_capabilities, fn ->
+        %{"extensions" => extensions}
+        |> maybe_put_elicitation(capabilities?)
+      end)
+
     params =
       Map.put(params, "_meta", %{
         Protocol.meta_key(:protocol_version) => @version,
-        Protocol.meta_key(:client_capabilities) => %{"extensions" => extensions},
+        Protocol.meta_key(:client_capabilities) => client_capabilities,
         Protocol.meta_key(:client_info) => %{"name" => "phase2-test", "version" => "1.0.0"}
       })
 
@@ -659,6 +701,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     |> Map.put(:req_headers, headers)
     |> MCPPlug.call(runtime)
   end
+
+  defp maybe_put_elicitation(capabilities, true),
+    do: Map.put(capabilities, "elicitation", %{"form" => %{}})
+
+  defp maybe_put_elicitation(capabilities, false), do: capabilities
 
   defp elicitation_request do
     %{
