@@ -24,6 +24,19 @@ defmodule TamaMCP.Task.Store do
 
   `create/2` must atomically reject an existing `{owner_key, task_id}` and make
   a successful task immediately visible to owner-bound `get/3` calls.
+
+  `update/4` must atomically accept only responses for keys that are currently
+  outstanding on an `input_required` task. Unknown, already-answered, and
+  superseded keys are ignored. Accepted responses must be recorded
+  idempotently before the callback returns `:ok`; the adapter may notify its
+  durable worker only after that commit. A request that accepts no new response
+  must not signal the worker.
+
+  `cancel/3` must atomically and idempotently record cooperative cancellation
+  intent on a non-terminal task. It does not transition the task to
+  `cancelled`, and it must not overwrite a terminal state that wins the race.
+  The adapter may signal its durable worker only after cancellation intent is
+  committed.
   """
 
   alias TamaMCP.{Error, Task}
@@ -31,7 +44,8 @@ defmodule TamaMCP.Task.Store do
   @type owner_key :: term()
   @type options :: keyword()
   @type lookup_error :: :not_found | Error.t()
-  @type mutation_error :: :not_found | :conflict | :invalid_state | Error.t()
+  @type mutation_error ::
+          :not_found | :conflict | :invalid_state | :invalid_task | Error.t()
 
   @callback create(Task.t(), options()) ::
               {:ok, Task.t()} | {:error, :conflict | Error.t()}

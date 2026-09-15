@@ -26,7 +26,12 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Server-directed task execution plus `tasks/get`, `tasks/update`, and
   `tasks/cancel`, gated by the per-request Tasks capability and complete runtime
   adapter configuration.
-- Vendored Tasks schema validation and task-focused conformance fixtures.
+- Complete deterministic Phase 2 conformance data with 23 Tasks HTTP fixtures,
+  11 task-state profile fixtures, independent JSON-RPC envelope and nested
+  result validation, and reusable static-fixture validation.
+- Reference task-store coverage for atomic one-time input responses, durable
+  idempotent cancellation intent, recovery through a fresh runtime, and
+  concurrent mutation races.
 
 ### Security
 

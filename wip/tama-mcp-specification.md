@@ -1,7 +1,7 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: Phase 1 implemented; Phase 2 implementation in progress; Phases 3-5
-pending
+Status: Phases 0-2 implemented and verified; Phase 3 ready to begin; Phases 3-5
+not yet implemented
 
 This document is the authoritative design contract for the first complete
 `tama_mcp` implementation. It defines the package boundary, supported protocol,
@@ -1195,7 +1195,8 @@ The package test suite must include:
 8. server-directed task creation;
 9. every valid and invalid task transition;
 10. owner-bound `tasks/get`, `tasks/update`, and `tasks/cancel`;
-11. process-restart retrieval without an in-memory worker;
+11. fresh-runtime retrieval from the durable store without invoking an
+    in-memory worker;
 12. subscription acknowledgement and task notification shapes;
 13. publish-after-commit adapter behavior;
 14. reconnect reconciliation through `tasks/get`;
@@ -1227,6 +1228,20 @@ fixture must validate against the vendored core and Tasks schemas where a
 schema exists. The suite must also assert header presence, Base64 sentinel
 decoding, header/body equality, acknowledgement-first ordering, subscription ID
 tagging, and the absence of undeclared notification types.
+
+The Phase 2 task fixture document contains 23 deterministic HTTP fixtures and
+11 static task-profile fixtures. The HTTP fixtures cover task creation,
+capability denial, all five task states, owner-indistinguishable lookup,
+header/body disagreement, partial and complete input responses, cooperative
+cancellation, terminal cancellation races, and rejection of `tasks/result` and
+`tasks/list`. Every successful task response validates the complete JSON-RPC
+result envelope independently from its nested Tasks result.
+
+The static profile fixtures layer TamaMCP's stricter task-state invariants over
+the pinned extension schema. They accept exactly the valid state-specific
+payload for all five task states, reject cross-state `inputRequests`, `result`,
+and `error` payloads, and reject an unsafe integer TTL. The checked fixture file
+must match its deterministic test builder.
 
 The examples in section 10 are the human-readable form of this fixture
 contract. If a checked fixture changes, the example must change in the same
@@ -1267,26 +1282,61 @@ contract without introducing a dependency from TamaMCP back to Tama.
 - task-runner behaviour and atomic durable dispatch;
 - server-directed task creation;
 - `tasks/get`, `tasks/update`, and `tasks/cancel`; and
-- conversion of Tama persistence away from Anubis task structs and
-  session-scoped identity.
+- the complete positive, negative, state-profile, recovery, and contention
+  conformance matrix for package-owned task behavior.
 
-The Phase 2 feature branch implements the TamaMCP-owned task value, transitions,
-adapter behaviours, server-directed creation, Tasks methods, pinned-schema
-validators, and an initial conformance fixture set. The complete positive and
-negative fixture matrix and application-side persistence and runner adapters
-remain Phase 2 follow-up work.
+Phase 2 implements the TamaMCP-owned task value, transitions, adapter
+behaviours, server-directed creation, Tasks methods, pinned-schema validators,
+and the complete package conformance fixture set. Application-side persistence
+and runner adapters deliberately remain in Phase 4 so the package can be
+completed before Tama replaces Anubis.
+
+Phase 2 completion is established by:
+
+- required, optional, and disabled tool-policy coverage with per-request Tasks
+  capability negotiation;
+- owner-bound creation, lookup, update, and cancellation with missing and
+  unauthorized tasks externally indistinguishable;
+- durable-visibility verification before exposing a task handle and bounded
+  containment of invalid, raising, throwing, or exiting adapters;
+- atomic, idempotent input-response and cancellation-intent semantics,
+  including no worker signal for no-op replays;
+- concurrent completion, cancellation, expiry, and input-update coverage that
+  preserves one valid durable winner;
+- fresh-runtime recovery through `tasks/get` without invoking a runner or
+  relying on a live task worker;
+- deterministic conformance data with 23 HTTP fixtures and 11 task-profile
+  fixtures; and
+- successful package precommit, Dialyzer, documentation, and Hex build gates.
+
+Phase 2 does not include an Ecto schema, database migration, Oban worker,
+Phoenix PubSub adapter, Tama endpoint migration, or Anubis removal. Those
+remain application-owned work after the reusable package phases are complete.
 
 ### Phase 3: subscriptions and task notifications
 
 - notification-bus behaviour;
+- process-local reference notification adapter for package tests;
 - `subscriptions/listen` stream and acknowledgement;
 - authorized `notifications/tasks` delivery;
 - expiry, idle, delivery-time, and policy-invalidation authorization checks;
-- Phoenix PubSub adapter in Tama; and
-- reconnect, overflow, and multi-node tests.
+- publish-after-commit, reconnect, overflow, and cleanup tests; and
+- deterministic positive and negative subscription conformance fixtures.
+
+Phase 3 starts from the Phase 2 durable store as the recovery source of truth.
+It must remain adapter-neutral and must not add Phoenix or Tama dependencies to
+the package. Notifications are hints: every stream failure, reconnect, dropped
+message, or overflow path must preserve recovery through `tasks/get`. The
+package phase is complete when the notification behaviour, reference adapter,
+stream transport, authorization rechecks, bounded buffering, and conformance
+fixtures pass the same package gates used for Phase 2.
 
 ### Phase 4: Tama integration
 
+- implement `upmaru/tama#123` with Tama-owned Ecto persistence and durable
+  runner adapters for the completed TamaMCP contracts;
+- implement the cluster-aware Phoenix PubSub notification adapter and
+  multi-node integration tests;
 - migrate `/mcp/system` first as the synchronous canary;
 - migrate `/mcp/app` with task-required `message`;
 - preserve Tama OAuth, rate-limit, recipient, submission, and graph ownership;

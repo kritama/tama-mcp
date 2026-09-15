@@ -48,6 +48,39 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.OutputTaskServer do
   tool(TamaMCP.Transport.StreamableHTTP.TasksTest.OutputTask, name: "output_task")
 end
 
+defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.FaultyStore do
+  @moduledoc false
+
+  @behaviour TamaMCP.Task.Store
+
+  alias TamaMCP.{Error, Task}
+
+  @impl true
+  def create(%Task{}, _options), do: {:error, Error.internal()}
+
+  @impl true
+  def get(_owner_key, _task_id, options), do: fault(options)
+
+  @impl true
+  def transition(_owner_key, _task_id, _revision, _status, _attributes, _options),
+    do: {:error, Error.internal()}
+
+  @impl true
+  def update(_owner_key, _task_id, _responses, options), do: fault(options)
+
+  @impl true
+  def cancel(_owner_key, _task_id, options), do: fault(options)
+
+  defp fault(options) do
+    case Keyword.fetch!(options, :fault) do
+      :raise -> raise "task store secret must not leak"
+      :throw -> throw("task store secret must not leak")
+      :exit -> exit("task store secret must not leak")
+      :invalid -> {:raw_adapter_value, "task store secret must not leak"}
+    end
+  end
+end
+
 defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   @moduledoc false
 
@@ -182,6 +215,32 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
              get_in(decode(missing), ["error", "message"])
   end
 
+  test "cross-owner get, update, and cancel are indistinguishable from missing tasks", %{
+    runtime: runtime
+  } do
+    task = create_task(runtime)
+
+    requests = [
+      {Protocol.method(:tasks_get), %{"taskId" => task.id}},
+      {Protocol.method(:tasks_update),
+       %{
+         "taskId" => task.id,
+         "inputResponses" => %{"approval" => %{"action" => "decline"}}
+       }},
+      {Protocol.method(:tasks_cancel), %{"taskId" => task.id}}
+    ]
+
+    for {method, params} <- requests do
+      unauthorized = post(runtime, method, params, name: task.id, token: "other")
+      missing_params = Map.put(params, "taskId", "missing")
+      missing = post(runtime, method, missing_params, name: "missing")
+
+      assert unauthorized.status == 400
+      assert missing.status == 400
+      assert decode(unauthorized)["error"] == decode(missing)["error"]
+    end
+  end
+
   test "tasks/get hides a mismatched stored owner behind task-not-found", %{
     runtime: runtime,
     store: store
@@ -233,9 +292,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert {:error, :not_found} = Store.get(nil, "task-phase2-1", agent: store)
   end
 
-  test "tasks/update accepts only outstanding input response keys", %{runtime: runtime} do
+  test "tasks/update accepts outstanding responses once and ignores unknown or answered keys", %{
+    runtime: runtime
+  } do
     task = create_task(runtime)
-    requests = %{"approval" => elicitation_request()}
+
+    requests = %{
+      "approval" => elicitation_request(),
+      "followup" => elicitation_request("Continue?")
+    }
 
     assert {:ok, waiting} =
              Store.transition(
@@ -265,6 +330,40 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert_receive {:task_updated, "task-phase2-1",
                     %{"approval" => %{"action" => "accept", "content" => %{"approved" => true}}}}
+
+    assert {:ok, partially_answered} =
+             Store.get(task.owner_key, task.id, Runtime.effective_task_store_options(runtime))
+
+    assert partially_answered.input_requests == %{"followup" => requests["followup"]}
+
+    replay =
+      post(
+        runtime,
+        Protocol.method(:tasks_update),
+        %{"taskId" => waiting.id, "inputResponses" => responses},
+        name: waiting.id
+      )
+
+    assert replay.status == 200
+    refute_receive {:task_updated, "task-phase2-1", _responses}
+
+    followup = %{"action" => "decline"}
+
+    complete =
+      post(
+        runtime,
+        Protocol.method(:tasks_update),
+        %{"taskId" => waiting.id, "inputResponses" => %{"followup" => followup}},
+        name: waiting.id
+      )
+
+    assert complete.status == 200
+    assert_receive {:task_updated, "task-phase2-1", %{"followup" => ^followup}}
+
+    assert {:ok, answered} =
+             Store.get(task.owner_key, task.id, Runtime.effective_task_store_options(runtime))
+
+    assert answered.input_requests == %{}
 
     working_runtime = %{runtime | identifier_options: [task_id: "task-phase2-2"]}
     working = create_task(working_runtime)
@@ -361,6 +460,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
              Store.get(task.owner_key, task.id, runtime.task_store_options)
 
     assert persisted.status == :working
+    assert persisted.cancellation_requested
+    assert persisted.revision == task.revision + 1
+
+    replay = post(runtime, Protocol.method(:tasks_cancel), %{"taskId" => task.id}, name: task.id)
+    assert replay.status == 200
+    refute_receive {:task_cancelled, "task-phase2-1"}
+
+    assert {:ok, ^persisted} =
+             Store.get(task.owner_key, task.id, runtime.task_store_options)
 
     missing =
       post(runtime, Protocol.method(:tasks_cancel), %{"taskId" => "missing"}, name: "missing")
@@ -443,6 +551,35 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert get_in(decode(conn), ["error", "code"]) == Protocol.error_code(:header_mismatch)
   end
 
+  test "task store exceptions and invalid returns remain bounded and secret-free", %{store: store} do
+    requests = [
+      {Protocol.method(:tasks_get), %{"taskId" => "faulty-task"}},
+      {Protocol.method(:tasks_update), %{"taskId" => "faulty-task", "inputResponses" => %{}}},
+      {Protocol.method(:tasks_cancel), %{"taskId" => "faulty-task"}}
+    ]
+
+    for fault <- [:raise, :throw, :exit, :invalid], {method, params} <- requests do
+      runtime =
+        runtime(store, self(),
+          task_store: __MODULE__.FaultyStore,
+          task_store_options: [fault: fault]
+        )
+
+      log =
+        capture_log(fn ->
+          conn = post(runtime, method, params, name: "faulty-task")
+
+          assert conn.status == 500
+          assert get_in(decode(conn), ["error", "code"]) == @internal
+          refute conn.resp_body =~ "task store secret"
+          refute conn.resp_body =~ "raw_adapter_value"
+        end)
+
+      refute log =~ "task store secret"
+      refute log =~ "raw_adapter_value"
+    end
+  end
+
   test "invalid runner returns remain internal and expose no handle", %{
     runtime: runtime,
     store: store
@@ -466,6 +603,50 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     refute log =~ "invalid"
     assert {:error, :not_found} = Store.get("test-owner", "task-phase2-1", agent: store)
+  end
+
+  test "runner errors and exceptions remain bounded and expose no task handle", %{store: store} do
+    for result <- [{:error, Error.internal()}, :raise, :throw, :exit] do
+      runtime = runtime(store, self(), task_runner_options: [result: result])
+
+      log =
+        capture_log(fn ->
+          conn =
+            post(
+              runtime,
+              Protocol.method(:tools_call),
+              %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+              name: "task_required"
+            )
+
+          assert conn.status == 500
+          assert get_in(decode(conn), ["error", "code"]) == @internal
+          refute decode(conn)["result"]
+          refute conn.resp_body =~ "task runner secret"
+        end)
+
+      refute log =~ "task runner secret"
+      assert {:error, :not_found} = Store.get("test-owner", "task-phase2-1", agent: store)
+    end
+  end
+
+  test "missing, mismatched, and invalid persisted tasks never expose a handle" do
+    for persistence <- [:missing, :mismatched, :invalid] do
+      {:ok, store} = Store.start_link()
+      runtime = runtime(store, self(), task_runner_options: [persistence: persistence])
+
+      conn =
+        post(
+          runtime,
+          Protocol.method(:tools_call),
+          %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+          name: "task_required"
+        )
+
+      assert conn.status == 500
+      assert get_in(decode(conn), ["error", "code"]) == @internal
+      refute decode(conn)["result"]
+    end
   end
 
   test "durability verification accepts a task that advances before lookup", %{
@@ -636,6 +817,56 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert decode(conn)["result"]["resultType"] == "task"
   end
 
+  test "task-disabled tools remain synchronous without consulting task selection", %{store: store} do
+    runtime = runtime(store, self(), server: TamaMCP.TestSupport.Server, selector: :raise)
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "echo", "arguments" => %{"message" => "synchronous"}},
+        name: "echo"
+      )
+
+    assert conn.status == 200
+    assert decode(conn)["result"]["resultType"] == "complete"
+    assert get_in(decode(conn), ["result", "structuredContent", "message"]) == "synchronous"
+    refute_receive {:task_started, _, _, _, _, _}
+  end
+
+  test "invalid optional selectors remain bounded and do not invoke a runner", %{store: store} do
+    for selector <- [:invalid, :raise] do
+      runtime = runtime(store, self(), server: __MODULE__.OptionalServer, selector: selector)
+
+      conn =
+        post(
+          runtime,
+          Protocol.method(:tools_call),
+          %{"name" => "optional", "arguments" => %{"value" => "invalid"}},
+          name: "optional"
+        )
+
+      assert conn.status == 500
+      assert get_in(decode(conn), ["error", "code"]) == @internal
+      refute_receive {:task_started, _, _, _, _, _}
+    end
+  end
+
+  test "tasks/get recovers through a fresh runtime without invoking the runner", %{
+    runtime: runtime,
+    store: store
+  } do
+    task = create_task(runtime)
+    fresh = runtime(store, self(), task_runner_options: [result: :raise])
+
+    conn = post(fresh, Protocol.method(:tasks_get), %{"taskId" => task.id}, name: task.id)
+
+    assert conn.status == 200
+    assert get_in(decode(conn), ["result", "taskId"]) == task.id
+    assert get_in(decode(conn), ["result", "status"]) == "working"
+    refute_receive {:task_started, _, _, _, _, _}
+  end
+
   defp create_task(runtime) do
     conn =
       post(
@@ -652,15 +883,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
   defp runtime(store, test, options \\ []) do
     server = Keyword.get(options, :server, TamaMCP.TestSupport.TaskRequiredServer)
+    task_store = Keyword.get(options, :task_store, Store)
+    task_store_options = Keyword.get(options, :task_store_options, agent: store, test: test)
+    runner_options = Keyword.get(options, :task_runner_options, test: test)
 
     runtime_options = [
       server: server,
       authorization: TamaMCP.TestSupport.Authorization,
       cache: TamaMCP.TestSupport.Cache,
-      task_store: Store,
-      task_store_options: [agent: store, test: test],
+      task_store: task_store,
+      task_store_options: task_store_options,
       task_runner: TamaMCP.TestSupport.Tasks.Runner,
-      task_runner_options: [test: test],
+      task_runner_options: Keyword.put_new(runner_options, :test, test),
       clock: TamaMCP.TestSupport.Tasks.Clock,
       clock_options: [now: @created],
       identifier: TamaMCP.TestSupport.Tasks.Identifier
@@ -676,6 +910,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
       case Keyword.get(options, :selector, :task) do
         nil -> runtime_options
         :task -> Keyword.put(runtime_options, :task_selector, fn _, _, _ -> :task end)
+        :sync -> Keyword.put(runtime_options, :task_selector, fn _, _, _ -> :sync end)
+        :invalid -> Keyword.put(runtime_options, :task_selector, fn _, _, _ -> :invalid end)
+        :raise -> Keyword.put(runtime_options, :task_selector, fn _, _, _ -> raise "secret" end)
       end
 
     MCPPlug.init(runtime_options)
@@ -727,11 +964,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
   defp maybe_put_elicitation(capabilities, false), do: capabilities
 
-  defp elicitation_request do
+  defp elicitation_request(message \\ "Approve?") do
     %{
       "method" => "elicitation/create",
       "params" => %{
-        "message" => "Approve?",
+        "message" => message,
         "mode" => "form",
         "requestedSchema" => %{
           "type" => "object",
