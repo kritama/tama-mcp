@@ -2,13 +2,20 @@ defmodule TamaMCP.Task.StoreTest do
   use ExUnit.Case
 
   alias TamaMCP.{Error, Task}
+  alias TamaMCP.TestSupport.Cache
   alias TamaMCP.TestSupport.Tasks.Store
 
   @created ~U[2026-09-14 12:00:00Z]
 
   setup do
     {:ok, store} = Store.start_link()
-    {:ok, store: store, options: [agent: store]}
+
+    options = [
+      agent: store,
+      tama_mcp: [task_validation_options: [cache: Cache]]
+    ]
+
+    {:ok, store: store, options: options}
   end
 
   test "creation is atomic and lookup is owner-bound", %{options: options} do

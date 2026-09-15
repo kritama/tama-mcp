@@ -68,9 +68,14 @@ defmodule TamaMCP.TaskTest do
     input = task() |> transitioned!(:input_required)
 
     assert {:ok, updated} =
-             Task.transition(input, :input_required,
-               status_message: "Still waiting.",
-               last_updated_at: ~U[2026-09-14 12:00:02Z]
+             Task.transition(
+               input,
+               :input_required,
+               [
+                 status_message: "Still waiting.",
+                 last_updated_at: ~U[2026-09-14 12:00:02Z]
+               ],
+               validation_options()
              )
 
     assert updated.input_requests == input.input_requests
@@ -116,6 +121,7 @@ defmodule TamaMCP.TaskTest do
 
   test "honors explicitly configured task bounds during creation and transitions" do
     validation_options = [
+      cache: Cache,
       max_task_ttl_ms: 777_600_000,
       max_status_message_bytes: 4_096
     ]
@@ -184,8 +190,30 @@ defmodule TamaMCP.TaskTest do
                task(),
                :completed,
                %{result: oversized, last_updated_at: @later},
-               max_result_bytes: 512,
-               result_metadata: %{"io.modelcontextprotocol/serverInfo" => %{"name" => "test"}}
+               validation_options(
+                 max_result_bytes: 512,
+                 result_metadata: %{
+                   "io.modelcontextprotocol/serverInfo" => %{"name" => "test"}
+                 }
+               )
+             )
+  end
+
+  test "rejects JSON-safe state payloads that violate their protocol schemas" do
+    assert {:error, :invalid_task} =
+             Task.transition(
+               task(),
+               :input_required,
+               %{input_requests: %{"approval" => %{}}, last_updated_at: @later},
+               validation_options()
+             )
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               task(),
+               :completed,
+               %{result: %{}, last_updated_at: @later},
+               validation_options()
              )
   end
 
@@ -220,7 +248,8 @@ defmodule TamaMCP.TaskTest do
       Task.transition(
         task,
         :working,
-        Keyword.put(overrides, :last_updated_at, next_updated_at(task))
+        Keyword.put(overrides, :last_updated_at, next_updated_at(task)),
+        validation_options()
       )
 
   defp transition(task, :input_required, overrides) do
@@ -228,7 +257,7 @@ defmodule TamaMCP.TaskTest do
       [input_requests: %{}, last_updated_at: next_updated_at(task)]
       |> Keyword.merge(overrides)
 
-    Task.transition(task, :input_required, attributes)
+    Task.transition(task, :input_required, attributes, validation_options())
   end
 
   defp transition(task, :completed, overrides) do
@@ -238,7 +267,7 @@ defmodule TamaMCP.TaskTest do
       [result: result, last_updated_at: next_updated_at(task)]
       |> Keyword.merge(overrides)
 
-    Task.transition(task, :completed, attributes)
+    Task.transition(task, :completed, attributes, validation_options())
   end
 
   defp transition(task, :failed, overrides) do
@@ -246,7 +275,7 @@ defmodule TamaMCP.TaskTest do
       [error: Error.internal("Execution failed"), last_updated_at: next_updated_at(task)]
       |> Keyword.merge(overrides)
 
-    Task.transition(task, :failed, attributes)
+    Task.transition(task, :failed, attributes, validation_options())
   end
 
   defp transition(task, :cancelled, overrides),
@@ -254,7 +283,8 @@ defmodule TamaMCP.TaskTest do
       Task.transition(
         task,
         :cancelled,
-        Keyword.put(overrides, :last_updated_at, next_updated_at(task))
+        Keyword.put(overrides, :last_updated_at, next_updated_at(task)),
+        validation_options()
       )
 
   defp status_kind(:working), do: :working_task
@@ -274,4 +304,5 @@ defmodule TamaMCP.TaskTest do
 
   defp later(seconds), do: DateTime.add(@created, seconds, :second)
   defp next_updated_at(task), do: DateTime.add(task.last_updated_at, 1, :second)
+  defp validation_options(overrides \\ []), do: Keyword.merge([cache: Cache], overrides)
 end

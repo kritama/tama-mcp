@@ -15,6 +15,7 @@ defmodule TamaMCP.Schema.Tasks do
     failed_task: "FailedTask",
     get_task_request: "GetTaskRequest",
     get_task_result: "GetTaskResult",
+    input_requests: "InputRequests",
     input_required_task: "InputRequiredTask",
     update_task_request: "UpdateTaskRequest",
     update_task_result: "UpdateTaskResult",
@@ -48,6 +49,7 @@ defmodule TamaMCP.Schema.Tasks do
           | :failed_task
           | :get_task_request
           | :get_task_result
+          | :input_requests
           | :input_required_task
           | :update_task_request
           | :update_task_result

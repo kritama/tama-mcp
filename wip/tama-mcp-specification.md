@@ -931,9 +931,12 @@ error-data bounds plus server result metadata in a reserved `:tama_mcp` adapter
 option. Stores must pass those validation options to
 `TamaMCP.Task.transition/4`; runners receive the same options for
 `TamaMCP.Task.new/2`. Task validation checks the complete encoded `tasks/get`
-result before a state commit. This keeps explicitly raised or lowered runtime
-limits consistent at construction, persistence, lookup, transition, and wire
-recovery boundaries.
+result before a state commit. It also validates `input_required` payloads
+against the pinned `InputRequests` schema and `completed` payloads against the
+pinned core `CallToolResult` schema using the configured validator cache. This
+keeps explicitly raised or lowered runtime limits and protocol payload
+contracts consistent at construction, persistence, lookup, transition, and
+wire recovery boundaries.
 
 ### 13.4 Task runner behaviour
 

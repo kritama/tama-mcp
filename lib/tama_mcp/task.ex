@@ -7,6 +7,8 @@ defmodule TamaMCP.Task do
   """
 
   alias TamaMCP.{Error, JSON, Protocol}
+  alias TamaMCP.Schema.Protocol, as: ProtocolSchema
+  alias TamaMCP.Schema.Tasks, as: TasksSchema
 
   @statuses [:working, :input_required, :completed, :failed, :cancelled]
   @terminal [:completed, :failed, :cancelled]
@@ -113,9 +115,14 @@ defmodule TamaMCP.Task do
     maximum = Keyword.get(options, :max_status_message_bytes, 2_048)
     maximum_ttl = Keyword.get(options, :max_task_ttl_ms, 604_800_000)
 
-    if common?(task, maximum, maximum_ttl) and payload?(task) and result_size?(task, options),
-      do: :ok,
-      else: {:error, :invalid_task}
+    if common?(task, maximum, maximum_ttl) and payload?(task, options) and
+         result_size?(task, options),
+       do: :ok,
+       else: {:error, :invalid_task}
+  rescue
+    _exception -> {:error, :invalid_task}
+  catch
+    _kind, _reason -> {:error, :invalid_task}
   end
 
   @doc """
@@ -263,24 +270,34 @@ defmodule TamaMCP.Task do
   defp original_params?(nil), do: true
   defp original_params?(params), do: is_map(params) and JSON.value?(params)
 
-  defp payload?(%__MODULE__{status: :working} = task),
+  defp payload?(%__MODULE__{status: :working} = task, _options),
     do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)
 
-  defp payload?(%__MODULE__{status: :input_required} = task),
+  defp payload?(%__MODULE__{status: :input_required} = task, options),
     do:
       is_map(task.input_requests) and JSON.value?(task.input_requests) and is_nil(task.result) and
-        is_nil(task.error)
+        is_nil(task.error) and
+        schema_valid?(TasksSchema, :input_requests, task.input_requests, options)
 
-  defp payload?(%__MODULE__{status: :completed} = task),
+  defp payload?(%__MODULE__{status: :completed} = task, options),
     do:
       is_nil(task.input_requests) and is_map(task.result) and JSON.value?(task.result) and
-        is_nil(task.error)
+        is_nil(task.error) and
+        schema_valid?(ProtocolSchema, :call_tool_result, task.result, options)
 
-  defp payload?(%__MODULE__{status: :failed} = task),
+  defp payload?(%__MODULE__{status: :failed} = task, _options),
     do: is_nil(task.input_requests) and is_nil(task.result) and match?(%Error{}, task.error)
 
-  defp payload?(%__MODULE__{status: :cancelled} = task),
+  defp payload?(%__MODULE__{status: :cancelled} = task, _options),
     do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)
+
+  defp schema_valid?(schema, kind, value, options) do
+    cache = Keyword.get(options, :cache)
+    cache_options = Keyword.get(options, :cache_options, [])
+
+    is_atom(cache) and not is_nil(cache) and Keyword.keyword?(cache_options) and
+      schema.validate(kind, value, cache, cache_options) == :ok
+  end
 
   defp result_size?(task, options) do
     maximum = Keyword.get(options, :max_result_bytes, 1_048_576)

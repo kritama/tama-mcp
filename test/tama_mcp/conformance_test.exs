@@ -7,6 +7,7 @@ defmodule TamaMCP.ConformanceTest do
   alias TamaMCP.Conformance
   alias TamaMCP.TestSupport.Tasks.Store
   alias TamaMCP.Transport.StreamableHTTP.Plug, as: MCPPlug
+  alias TamaMCP.Transport.StreamableHTTP.Runtime
 
   defmodule Cache do
     @moduledoc false
@@ -167,7 +168,7 @@ defmodule TamaMCP.ConformanceTest do
           input_requests: %{"approval" => elicitation_request()},
           last_updated_at: ~U[2026-09-14 12:00:01Z]
         },
-        agent: store
+        Runtime.effective_task_store_options(runtime)
       )
 
     request(task_request, runtime)

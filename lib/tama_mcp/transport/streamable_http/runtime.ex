@@ -144,7 +144,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
       max_task_ttl_ms: limits.max_task_ttl_ms,
       max_result_bytes: limits.max_result_bytes,
       max_error_data_bytes: limits.max_error_data_bytes,
-      result_metadata: Result.metadata(runtime.server)
+      result_metadata: Result.metadata(runtime.server),
+      cache: runtime.cache,
+      cache_options: runtime.cache_options
     ]
   end
 

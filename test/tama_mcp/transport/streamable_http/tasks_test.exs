@@ -183,10 +183,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert {:error, :not_found} = Store.get(nil, "task-phase2-1", agent: store)
   end
 
-  test "tasks/update accepts only outstanding input response keys", %{
-    runtime: runtime,
-    store: store
-  } do
+  test "tasks/update accepts only outstanding input response keys", %{runtime: runtime} do
     task = create_task(runtime)
     requests = %{"approval" => elicitation_request()}
 
@@ -197,7 +194,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
                task.revision,
                :input_required,
                %{input_requests: requests, last_updated_at: @later},
-               agent: store
+               Runtime.effective_task_store_options(runtime)
              )
 
     responses = %{
@@ -299,7 +296,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
                  task.revision,
                  status,
                  attributes,
-                 agent: store
+                 Runtime.effective_task_store_options(state_runtime)
                )
 
       get =
@@ -442,6 +439,34 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
              )
 
     assert {:ok, ^task} = Store.get(task.owner_key, task.id, agent: store)
+  end
+
+  test "store transitions reject schema-invalid task payloads before commit", %{
+    runtime: runtime
+  } do
+    task = create_task(runtime)
+    options = Runtime.effective_task_store_options(runtime)
+
+    invalid_transitions = [
+      {:input_required, %{input_requests: %{"approval" => %{}}}},
+      {:completed, %{result: %{}}}
+    ]
+
+    for {status, attributes} <- invalid_transitions do
+      attributes = Map.put(attributes, :last_updated_at, @later)
+
+      assert {:error, :invalid_task} =
+               Store.transition(
+                 task.owner_key,
+                 task.id,
+                 task.revision,
+                 status,
+                 attributes,
+                 options
+               )
+
+      assert {:ok, ^task} = Store.get(task.owner_key, task.id, options)
+    end
   end
 
   test "optional task selection is explicit and defaults to synchronous", %{store: store} do
