@@ -900,7 +900,9 @@ non-terminal task to `failed` with a bounded expiration error after its TTL.
 
 The task store must preserve timestamps, TTL, suggested polling interval,
 status message, original request correlation, and the state-specific result,
-error, or input requests required by the protocol.
+error, or input requests required by the protocol. It must also preserve every
+issued input-request key for the task's lifetime and reject reuse after a key is
+no longer outstanding.
 
 Task TTL and polling values must remain within the Tasks schema's maximum safe
 integer `9_007_199_254_740_991`, even when a host raises runtime limits.
@@ -937,7 +939,10 @@ pinned core `CallToolResult` schema using the configured validator cache. This
 keeps explicitly raised or lowered runtime limits and protocol payload
 contracts consistent at construction, persistence, lookup, transition, and
 wire recovery boundaries. Failed transitions validate the safely encoded error
-against the pinned Tasks `Error` schema before persistence.
+against the pinned Tasks `Error` schema before persistence. Per-task validation
+options retain the originating tool so a completed result's
+`structuredContent` is also checked against its declared output schema before
+commit.
 
 ### 13.4 Task runner behaviour
 

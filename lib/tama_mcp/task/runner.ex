@@ -10,6 +10,7 @@ defmodule TamaMCP.Task.Runner do
   The `:tama_mcp` entry in `options` contains the generated task identity,
   timestamps, effective clock and store options, and `:task_validation_options`
   that must be passed to `TamaMCP.Task.new/2` and every later task transition.
+  The validation options retain the originating tool for output-schema checks.
   """
 
   @callback start(

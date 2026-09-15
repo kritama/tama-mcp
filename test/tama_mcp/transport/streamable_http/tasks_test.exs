@@ -21,6 +21,33 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.OptionalServer do
   tool(TamaMCP.Transport.StreamableHTTP.TasksTest.OptionalTool, name: "optional")
 end
 
+defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.OutputTask do
+  @moduledoc false
+
+  use TamaMCP.Tool, task: :required, scopes: ["test.task_required"]
+
+  input_schema do
+    field(:value, :string, required: true)
+  end
+
+  output_schema do
+    field(:status, {:enum, ["done"]}, required: true)
+  end
+
+  @impl true
+  def call(_input, _context) do
+    {:ok, TamaMCP.Response.success(structured_content: %{"status" => "done"})}
+  end
+end
+
+defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.OutputTaskServer do
+  @moduledoc false
+
+  use TamaMCP.Server, name: "output-task", version: "1.0.0"
+
+  tool(TamaMCP.Transport.StreamableHTTP.TasksTest.OutputTask, name: "output_task")
+end
+
 defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   @moduledoc false
 
@@ -151,6 +178,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert get_in(decode(unauthorized), ["error", "message"]) ==
              get_in(decode(missing), ["error", "message"])
+  end
+
+  test "tasks/get hides a mismatched stored owner behind task-not-found", %{
+    runtime: runtime,
+    store: store
+  } do
+    task = create_task(runtime)
+    mismatched = %{task | owner_key: "another-owner"}
+
+    Agent.update(store, &Map.put(&1, {task.owner_key, task.id}, mismatched))
+
+    mismatch = post(runtime, Protocol.method(:tasks_get), %{"taskId" => task.id}, name: task.id)
+
+    missing =
+      post(runtime, Protocol.method(:tasks_get), %{"taskId" => "missing"}, name: "missing")
+
+    assert mismatch.status == 400
+    assert decode(mismatch)["error"] == decode(missing)["error"]
   end
 
   test "task methods fail closed when authorization does not provide an owner", %{
@@ -471,6 +516,40 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
       assert {:ok, ^task} = Store.get(task.owner_key, task.id, options)
     end
+  end
+
+  test "store completion enforces the originating tool output schema", %{store: store} do
+    runtime = runtime(store, self(), server: __MODULE__.OutputTaskServer)
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "output_task", "arguments" => %{"value" => "hello"}},
+        name: "output_task"
+      )
+
+    assert conn.status == 200
+    assert_receive {:task_started, __MODULE__.OutputTask, _, _, %Task{} = task, generated}
+
+    invalid_result = %{
+      "resultType" => "complete",
+      "content" => [],
+      "structuredContent" => %{"status" => "invalid"},
+      "isError" => false
+    }
+
+    assert {:error, :invalid_task} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :completed,
+               %{result: invalid_result, last_updated_at: @later},
+               generated[:task_store_options]
+             )
+
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, generated[:task_store_options])
   end
 
   test "optional task selection is explicit and defaults to synchronous", %{store: store} do

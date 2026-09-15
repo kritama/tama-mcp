@@ -4,6 +4,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   alias TamaMCP.{Clock, Context, Error, Identifier, Protocol, Response, Schema, Task}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
   alias TamaMCP.Schema.Tasks
+  alias TamaMCP.Task.Validation, as: TaskValidation
   alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Runner, Runtime, Wire}
 
   @max_detail_bytes 512
@@ -175,10 +176,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     with {:ok, identifier} <- Identifier.generate(runtime.identifier, runtime.identifier_options),
          {:ok, now} <- Clock.now(runtime.clock, runtime.clock_options),
          task_context = %{context | task_id: identifier},
-         options = task_options(runtime, request, task_context, identifier, now),
+         options = task_options(runtime, module, request, task_context, identifier, now),
          {:ok, %Task{} = task} <- start_task(runtime, module, arguments, task_context, options),
-         :ok <- validate_created_task(task, task_context, request, options, runtime),
-         :ok <- verify_persisted_task(task, runtime),
+         :ok <- validate_created_task(task, task_context, request, options),
+         :ok <- verify_persisted_task(task, options, runtime),
          result =
            task
            |> Task.create_result()
@@ -213,7 +214,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     _kind, _reason -> {:error, :task_runner_exception}
   end
 
-  defp task_options(runtime, request, context, identifier, now) do
+  defp task_options(runtime, module, request, context, identifier, now) do
+    validation_options = Runtime.task_validation_options(runtime, module)
+
     generated = [
       task_id: identifier,
       owner_key: context.owner_key,
@@ -226,47 +229,47 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       clock: runtime.clock,
       clock_options: runtime.clock_options,
       task_store: runtime.task_store,
-      task_store_options: Runtime.effective_task_store_options(runtime),
-      task_validation_options: Runtime.task_validation_options(runtime)
+      task_store_options: Runtime.effective_task_store_options(runtime, validation_options),
+      task_validation_options: validation_options
     ]
 
     Keyword.put(runtime.task_runner_options, :tama_mcp, generated)
   end
 
-  defp validate_created_task(task, context, request, options, runtime) do
+  defp validate_created_task(task, context, request, options) do
     generated = Keyword.fetch!(options, :tama_mcp)
 
-    valid? =
-      created_identity?(task, context, request) and created_timing?(task, generated) and
-        task.original_params == request.params
+    expected = %{
+      id: context.task_id,
+      owner_key: context.owner_key,
+      method: request.method,
+      request_id: request.request_id,
+      status: :working,
+      created_at: generated[:created_at],
+      last_updated_at: generated[:created_at],
+      ttl_ms: generated[:ttl_ms],
+      poll_interval_ms: generated[:poll_interval_ms],
+      original_params: request.params
+    }
 
-    if valid? do
-      Task.validate(task, Runtime.task_validation_options(runtime))
+    if TaskValidation.matches?(task, expected) do
+      Task.validate(task, generated[:task_validation_options])
     else
       {:error, :invalid_task}
     end
   end
 
-  defp created_identity?(task, context, request) do
-    task.id == context.task_id and task.owner_key == context.owner_key and
-      task.method == request.method and task.request_id == request.request_id and
-      task.status == :working
-  end
+  defp verify_persisted_task(task, options, runtime) do
+    validation_options =
+      options |> Keyword.fetch!(:tama_mcp) |> Keyword.fetch!(:task_validation_options)
 
-  defp created_timing?(task, generated) do
-    task.created_at == generated[:created_at] and task.last_updated_at == generated[:created_at] and
-      task.ttl_ms == generated[:ttl_ms] and
-      task.poll_interval_ms == generated[:poll_interval_ms]
-  end
-
-  defp verify_persisted_task(task, runtime) do
     case runtime.task_store.get(
            task.owner_key,
            task.id,
            Runtime.effective_task_store_options(runtime)
          ) do
       {:ok, %Task{} = persisted} ->
-        validate_persisted_task(task, persisted, runtime)
+        validate_persisted_task(task, persisted, validation_options)
 
       _missing_or_mismatched ->
         {:error, :task_not_durable}
@@ -277,8 +280,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     _kind, _reason -> {:error, :task_store_exception}
   end
 
-  defp validate_persisted_task(initial, persisted, runtime) do
-    with :ok <- Task.validate(persisted, Runtime.task_validation_options(runtime)),
+  defp validate_persisted_task(initial, persisted, validation_options) do
+    with :ok <- Task.validate(persisted, validation_options),
          true <- same_persisted_identity?(initial, persisted),
          true <- persisted_progress?(initial, persisted) do
       :ok
@@ -288,10 +291,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   end
 
   defp same_persisted_identity?(initial, persisted) do
-    persisted.id == initial.id and persisted.owner_key == initial.owner_key and
-      persisted.method == initial.method and persisted.request_id == initial.request_id and
-      persisted.created_at == initial.created_at and persisted.ttl_ms == initial.ttl_ms and
-      persisted.original_params == initial.original_params
+    TaskValidation.same_fields?(initial, persisted, [
+      :id,
+      :owner_key,
+      :method,
+      :request_id,
+      :created_at,
+      :ttl_ms,
+      :original_params
+    ])
   end
 
   defp persisted_progress?(initial, persisted) when persisted.revision == initial.revision,

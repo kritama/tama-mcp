@@ -7,8 +7,7 @@ defmodule TamaMCP.Task do
   """
 
   alias TamaMCP.{Error, JSON, Protocol}
-  alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Schema.Tasks, as: TasksSchema
+  alias TamaMCP.Task.Validation
 
   @statuses [:working, :input_required, :completed, :failed, :cancelled]
   @terminal [:completed, :failed, :cancelled]
@@ -20,6 +19,56 @@ defmodule TamaMCP.Task do
     failed: [],
     cancelled: []
   }
+  @payload_checks %{
+    working: [
+      {:absent, :input_requests},
+      {:absent, :result},
+      {:absent, :error}
+    ],
+    input_required: [
+      {:json_object, :input_requests},
+      {:absent, :result},
+      {:absent, :error},
+      {:schema, :input_requests, TamaMCP.Schema.Tasks, :input_requests},
+      {:recorded_keys, :input_requests, :input_request_keys}
+    ],
+    completed: [
+      {:absent, :input_requests},
+      {:json_object, :result},
+      {:absent, :error},
+      {:schema, :result, TamaMCP.Schema.Protocol, :call_tool_result},
+      {:tool_output, :result}
+    ],
+    failed: [
+      {:absent, :input_requests},
+      {:absent, :result},
+      {:struct, :error, Error},
+      {:schema, {:encoded_error, :error}, TamaMCP.Schema.Tasks, :error}
+    ],
+    cancelled: [
+      {:absent, :input_requests},
+      {:absent, :result},
+      {:absent, :error}
+    ]
+  }
+  @common_checks [
+    {:non_empty_binary, :id},
+    {:present, :owner_key},
+    {:non_empty_binary, :method},
+    {:binary_or_integer, :request_id},
+    {:one_of, :status, @statuses},
+    {:utc_datetime, :created_at},
+    {:utc_datetime, :last_updated_at},
+    {:not_before, :last_updated_at, :created_at},
+    {:bounded_positive_integer, :ttl_ms, {:option, :max_task_ttl_ms, 604_800_000},
+     @maximum_protocol_integer},
+    {:optional_bounded_positive_integer, :poll_interval_ms, @maximum_protocol_integer},
+    {:optional_utf8_bytes, :status_message, {:option, :max_status_message_bytes, 2_048}},
+    {:optional_json_object, :original_params},
+    {:unique_binary_list, :input_request_keys},
+    {:boolean, :cancellation_requested},
+    {:non_negative_integer, :revision}
+  ]
 
   @enforce_keys [
     :id,
@@ -46,6 +95,7 @@ defmodule TamaMCP.Task do
     :result,
     :error,
     :original_params,
+    input_request_keys: [],
     cancellation_requested: false,
     revision: 0
   ]
@@ -62,6 +112,7 @@ defmodule TamaMCP.Task do
           last_updated_at: DateTime.t(),
           ttl_ms: pos_integer(),
           poll_interval_ms: pos_integer() | nil,
+          input_request_keys: [String.t()],
           input_requests: map() | nil,
           result: map() | nil,
           error: Error.t() | nil,
@@ -86,6 +137,7 @@ defmodule TamaMCP.Task do
         __MODULE__,
         Map.merge(attributes, %{
           status: :working,
+          input_request_keys: [],
           input_requests: nil,
           result: nil,
           error: nil,
@@ -112,10 +164,9 @@ defmodule TamaMCP.Task do
   """
   @spec validate(t(), keyword()) :: :ok | {:error, :invalid_task}
   def validate(%__MODULE__{} = task, options \\ []) do
-    maximum = Keyword.get(options, :max_status_message_bytes, 2_048)
-    maximum_ttl = Keyword.get(options, :max_task_ttl_ms, 604_800_000)
+    validation = Validation.new(task, options)
 
-    if common?(task, maximum, maximum_ttl) and payload?(task, options) and
+    if Validation.valid?(validation, @common_checks) and payload?(validation, task.status) and
          result_size?(task, options),
        do: :ok,
        else: {:error, :invalid_task}
@@ -187,11 +238,10 @@ defmodule TamaMCP.Task do
             Map.get(attributes, :cancellation_requested, task.cancellation_requested),
           revision: task.revision + 1
         })
-        |> state_payload(status, attributes)
 
-      case validate(candidate, options) do
-        :ok -> {:ok, candidate}
-        {:error, :invalid_task} -> {:error, :invalid_task}
+      with {:ok, candidate} <- state_payload(candidate, status, attributes),
+           :ok <- validate(candidate, options) do
+        {:ok, candidate}
       end
     else
       _invalid -> {:error, :invalid_task}
@@ -199,24 +249,56 @@ defmodule TamaMCP.Task do
   end
 
   defp state_payload(task, :working, _attributes),
-    do: %{task | input_requests: nil, result: nil, error: nil}
+    do: {:ok, %{task | input_requests: nil, result: nil, error: nil}}
 
-  defp state_payload(task, :input_required, attributes),
-    do: %{
-      task
-      | input_requests: Map.get(attributes, :input_requests, task.input_requests),
-        result: nil,
-        error: nil
-    }
+  defp state_payload(task, :input_required, attributes) do
+    requests = Map.get(attributes, :input_requests, task.input_requests)
+
+    with {:ok, keys} <- issue_input_request_keys(task, requests) do
+      {:ok,
+       %{
+         task
+         | input_request_keys: keys,
+           input_requests: requests,
+           result: nil,
+           error: nil
+       }}
+    end
+  end
 
   defp state_payload(task, :completed, attributes),
-    do: %{task | input_requests: nil, result: attributes[:result], error: nil}
+    do: {:ok, %{task | input_requests: nil, result: attributes[:result], error: nil}}
 
   defp state_payload(task, :failed, attributes),
-    do: %{task | input_requests: nil, result: nil, error: attributes[:error]}
+    do: {:ok, %{task | input_requests: nil, result: nil, error: attributes[:error]}}
 
   defp state_payload(task, :cancelled, _attributes),
-    do: %{task | input_requests: nil, result: nil, error: nil}
+    do: {:ok, %{task | input_requests: nil, result: nil, error: nil}}
+
+  defp issue_input_request_keys(task, requests)
+       when is_list(task.input_request_keys) and is_map(requests) do
+    current = if is_map(task.input_requests), do: task.input_requests, else: %{}
+
+    requests
+    |> Enum.reduce_while(
+      {:ok, MapSet.new(task.input_request_keys)},
+      &record_input_request_key(&1, &2, current)
+    )
+    |> case do
+      {:ok, issued} -> {:ok, issued |> Enum.to_list() |> Enum.sort()}
+      {:error, :invalid_task} = error -> error
+    end
+  end
+
+  defp issue_input_request_keys(task, _requests), do: {:ok, task.input_request_keys}
+
+  defp record_input_request_key({key, request}, {:ok, issued}, current) do
+    case {Map.fetch(current, key), MapSet.member?(issued, key)} do
+      {{:ok, ^request}, _issued?} -> {:cont, {:ok, issued}}
+      {_new_or_changed, true} -> {:halt, {:error, :invalid_task}}
+      {_new_or_changed, false} -> {:cont, {:ok, MapSet.put(issued, key)}}
+    end
+  end
 
   defp terminal_replay(task, next_status, attributes) do
     if next_status == task.status and replay_payload(task, attributes) == terminal_payload(task),
@@ -236,74 +318,8 @@ defmodule TamaMCP.Task do
     %{status_message: task.status_message, result: task.result, error: task.error}
   end
 
-  defp common?(task, maximum, maximum_ttl) do
-    identity?(task) and timestamps?(task) and timing?(task, maximum_ttl) and
-      metadata?(task, maximum)
-  end
-
-  defp identity?(task) do
-    is_binary(task.id) and task.id != "" and not is_nil(task.owner_key) and
-      is_binary(task.method) and task.method != "" and
-      (is_binary(task.request_id) or is_integer(task.request_id)) and task.status in @statuses
-  end
-
-  defp timestamps?(task) do
-    match?(%DateTime{}, task.created_at) and utc?(task.created_at) and
-      match?(%DateTime{}, task.last_updated_at) and utc?(task.last_updated_at) and
-      DateTime.compare(task.last_updated_at, task.created_at) != :lt
-  end
-
-  defp timing?(task, maximum_ttl) do
-    is_integer(maximum_ttl) and maximum_ttl > 0 and
-      is_integer(task.ttl_ms) and task.ttl_ms > 0 and
-      task.ttl_ms <= min(maximum_ttl, @maximum_protocol_integer) and
-      (is_nil(task.poll_interval_ms) or
-         (is_integer(task.poll_interval_ms) and task.poll_interval_ms > 0 and
-            task.poll_interval_ms <= @maximum_protocol_integer))
-  end
-
-  defp metadata?(task, maximum) do
-    status_message?(task.status_message, maximum) and original_params?(task.original_params) and
-      is_boolean(task.cancellation_requested) and is_integer(task.revision) and task.revision >= 0
-  end
-
-  defp original_params?(nil), do: true
-  defp original_params?(params), do: is_map(params) and JSON.value?(params)
-
-  defp payload?(%__MODULE__{status: :working} = task, _options),
-    do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)
-
-  defp payload?(%__MODULE__{status: :input_required} = task, options),
-    do:
-      is_map(task.input_requests) and JSON.value?(task.input_requests) and is_nil(task.result) and
-        is_nil(task.error) and
-        schema_valid?(TasksSchema, :input_requests, task.input_requests, options)
-
-  defp payload?(%__MODULE__{status: :completed} = task, options),
-    do:
-      is_nil(task.input_requests) and is_map(task.result) and JSON.value?(task.result) and
-        is_nil(task.error) and
-        schema_valid?(ProtocolSchema, :call_tool_result, task.result, options)
-
-  defp payload?(%__MODULE__{status: :failed} = task, options),
-    do:
-      is_nil(task.input_requests) and is_nil(task.result) and match?(%Error{}, task.error) and
-        schema_valid?(
-          TasksSchema,
-          :error,
-          Error.encode(task.error, Keyword.get(options, :max_error_data_bytes, 8_192)),
-          options
-        )
-
-  defp payload?(%__MODULE__{status: :cancelled} = task, _options),
-    do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)
-
-  defp schema_valid?(schema, kind, value, options) do
-    cache = Keyword.get(options, :cache)
-    cache_options = Keyword.get(options, :cache_options, [])
-
-    is_atom(cache) and not is_nil(cache) and Keyword.keyword?(cache_options) and
-      schema.validate(kind, value, cache, cache_options) == :ok
+  defp payload?(validation, status) do
+    Validation.valid?(validation, Map.fetch!(@payload_checks, status))
   end
 
   defp result_size?(task, options) do
@@ -324,14 +340,6 @@ defmodule TamaMCP.Task do
 
   defp put_result_metadata(result, metadata) when map_size(metadata) == 0, do: result
   defp put_result_metadata(result, metadata), do: Map.put(result, "_meta", metadata)
-
-  defp status_message?(nil, _maximum), do: true
-
-  defp status_message?(message, maximum),
-    do: is_binary(message) and String.valid?(message) and byte_size(message) <= maximum
-
-  defp utc?(%DateTime{utc_offset: 0, std_offset: 0}), do: true
-  defp utc?(_datetime), do: false
 
   defp base(task) do
     %{

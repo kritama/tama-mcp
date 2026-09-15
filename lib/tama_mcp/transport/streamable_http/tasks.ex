@@ -57,6 +57,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
           Events.emit(runtime, [:task, :lookup], %{status: :ok}, elem(reply, 1))
           reply
         else
+          {:error, :not_found} -> not_found(conn, request, runtime, base)
           {:error, reason} -> unexpected(conn, request, runtime, base, reason)
         end
 
@@ -130,7 +131,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
     if task.owner_key == owner_key and task.id == identifier do
       Task.validate(task, Runtime.task_validation_options(runtime))
     else
-      {:error, :invalid_task}
+      {:error, :not_found}
     end
   end
 

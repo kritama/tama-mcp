@@ -137,9 +137,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     do: not is_nil(store) and not is_nil(runner)
 
   @doc false
-  @spec task_validation_options(t()) :: keyword()
-  def task_validation_options(%__MODULE__{limits: limits} = runtime) do
-    [
+  @spec task_validation_options(t(), module() | nil) :: keyword()
+  def task_validation_options(%__MODULE__{limits: limits} = runtime, tool \\ nil) do
+    options = [
       max_status_message_bytes: limits.max_status_message_bytes,
       max_task_ttl_ms: limits.max_task_ttl_ms,
       max_result_bytes: limits.max_result_bytes,
@@ -148,12 +148,20 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
       cache: runtime.cache,
       cache_options: runtime.cache_options
     ]
+
+    if is_nil(tool), do: options, else: Keyword.put(options, :tool, tool)
   end
 
   @doc false
   @spec effective_task_store_options(t()) :: keyword()
   def effective_task_store_options(%__MODULE__{} = runtime) do
-    namespace = [task_validation_options: task_validation_options(runtime)]
+    effective_task_store_options(runtime, task_validation_options(runtime))
+  end
+
+  @doc false
+  @spec effective_task_store_options(t(), keyword()) :: keyword()
+  def effective_task_store_options(%__MODULE__{} = runtime, validation_options) do
+    namespace = [task_validation_options: validation_options]
     Keyword.put(runtime.task_store_options, :tama_mcp, namespace)
   end
 

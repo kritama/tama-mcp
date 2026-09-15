@@ -82,6 +82,60 @@ defmodule TamaMCP.TaskTest do
     assert updated.status_message == "Still waiting."
   end
 
+  test "records input-request keys for the lifetime of the task" do
+    requests = %{"approval" => elicitation_request()}
+
+    assert {:ok, waiting} =
+             Task.transition(
+               task(),
+               :input_required,
+               %{input_requests: requests, last_updated_at: @later},
+               validation_options()
+             )
+
+    assert waiting.input_request_keys == ["approval"]
+
+    assert {:ok, waiting} =
+             Task.transition(
+               waiting,
+               :input_required,
+               %{status_message: "Still waiting.", last_updated_at: later(2)},
+               validation_options()
+             )
+
+    assert waiting.input_request_keys == ["approval"]
+
+    assert {:ok, working} =
+             Task.transition(
+               waiting,
+               :working,
+               %{last_updated_at: later(3)},
+               validation_options()
+             )
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               working,
+               :input_required,
+               %{input_requests: requests, last_updated_at: later(4)},
+               validation_options()
+             )
+
+    assert {:ok, next_request} =
+             Task.transition(
+               working,
+               :input_required,
+               %{
+                 input_requests: %{"followup" => elicitation_request()},
+                 last_updated_at: later(4)
+               },
+               validation_options()
+             )
+
+    assert next_request.input_request_keys == ["approval", "followup"]
+    refute Map.has_key?(Task.get_result(next_request), "inputRequestKeys")
+  end
+
   test "encodes every detailed task variant against the pinned schema" do
     tasks = [
       task(),
@@ -208,6 +262,21 @@ defmodule TamaMCP.TaskTest do
                validation_options()
              )
 
+    invalid_output = %{
+      "resultType" => "complete",
+      "content" => [],
+      "structuredContent" => %{"status" => 123},
+      "isError" => false
+    }
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               task(),
+               :completed,
+               %{result: invalid_output, last_updated_at: @later},
+               validation_options(tool: TamaMCP.TestSupport.Tools.InvalidOutput)
+             )
+
     assert {:error, :invalid_task} =
              Task.transition(
                task(),
@@ -316,4 +385,19 @@ defmodule TamaMCP.TaskTest do
   defp later(seconds), do: DateTime.add(@created, seconds, :second)
   defp next_updated_at(task), do: DateTime.add(task.last_updated_at, 1, :second)
   defp validation_options(overrides \\ []), do: Keyword.merge([cache: Cache], overrides)
+
+  defp elicitation_request do
+    %{
+      "method" => "elicitation/create",
+      "params" => %{
+        "message" => "Approve?",
+        "mode" => "form",
+        "requestedSchema" => %{
+          "type" => "object",
+          "properties" => %{"approved" => %{"type" => "boolean"}},
+          "required" => ["approved"]
+        }
+      }
+    }
+  end
 end
