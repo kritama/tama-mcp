@@ -3,11 +3,21 @@ defmodule TamaMCP.Transport.StreamableHTTP.Result do
 
   alias TamaMCP.Protocol
 
-  def discover(server) do
+  def discover(server, task_capable? \\ false) do
+    capabilities =
+      if task_capable? do
+        %{
+          "tools" => %{},
+          "extensions" => %{Protocol.tasks_extension() => %{}}
+        }
+      else
+        %{"tools" => %{}}
+      end
+
     result = %{
       "resultType" => Protocol.result_type(:complete),
       "supportedVersions" => Protocol.supported_versions(),
-      "capabilities" => %{"tools" => %{}},
+      "capabilities" => capabilities,
       "ttlMs" => 0,
       "cacheScope" => "private",
       "_meta" => metadata(server)

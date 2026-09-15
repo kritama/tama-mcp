@@ -7,8 +7,9 @@ defmodule TamaMCP.Conformance do
   TamaMCP. This keeps Tama's composed-server tests on the package's pinned
   protocol revision without exposing the transport's internal codec modules.
 
-  Supported values are complete requests, complete responses, and the result
-  objects emitted by the Phase 1 methods.
+  Supported values are complete Phase 1 requests and responses plus the task
+  requests, task results, and detailed task values defined by the pinned Tasks
+  extension.
 
   `run/2` passes each fixture's `%{"headers" => [[name, value]], "body" => map}`
   request to the supplied callback. The callback returns
@@ -17,11 +18,20 @@ defmodule TamaMCP.Conformance do
   authorization header and synchronous tool contract.
   """
 
-  alias TamaMCP.Schema.Protocol
+  alias TamaMCP.Schema.{Protocol, Tasks}
 
   @fixture_path Path.expand("../../test/fixtures/protocol/2026-07-28/phase1.json", __DIR__)
+  @phase2_fixture_path Path.expand(
+                         "../../test/fixtures/protocol/2026-07-28/phase2.json",
+                         __DIR__
+                       )
   @external_resource @fixture_path
+  @external_resource @phase2_fixture_path
   @fixtures @fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
+  @phase2_fixtures @phase2_fixture_path
+                   |> File.read!()
+                   |> Jason.decode!()
+                   |> Map.fetch!("fixtures")
 
   @kinds %{
     "call_tool_request" => :call_tool_request,
@@ -33,7 +43,20 @@ defmodule TamaMCP.Conformance do
     "error_response" => :error_response,
     "list_tools_request" => :list_tools_request,
     "list_tools_result" => :list_tools_result,
-    "list_tools_response" => :list_tools_response
+    "list_tools_response" => :list_tools_response,
+    "cancel_task_request" => :cancel_task_request,
+    "cancel_task_result" => :cancel_task_result,
+    "cancelled_task" => :cancelled_task,
+    "completed_task" => :completed_task,
+    "create_task_result" => :create_task_result,
+    "detailed_task" => :detailed_task,
+    "failed_task" => :failed_task,
+    "get_task_request" => :get_task_request,
+    "get_task_result" => :get_task_result,
+    "input_required_task" => :input_required_task,
+    "update_task_request" => :update_task_request,
+    "update_task_result" => :update_task_result,
+    "working_task" => :working_task
   }
 
   @type kind ::
@@ -47,11 +70,26 @@ defmodule TamaMCP.Conformance do
           | :list_tools_request
           | :list_tools_result
           | :list_tools_response
+          | :cancel_task_request
+          | :cancel_task_result
+          | :cancelled_task
+          | :completed_task
+          | :create_task_result
+          | :detailed_task
+          | :failed_task
+          | :get_task_request
+          | :get_task_result
+          | :input_required_task
+          | :update_task_request
+          | :update_task_result
+          | :working_task
 
   @doc "Validates a protocol value against the vendored MCP schema."
   @spec validate(kind(), term(), module(), keyword()) :: :ok | {:error, [String.t()]}
   def validate(kind, value, cache, cache_options \\ []) do
-    Protocol.validate(kind, value, cache, cache_options)
+    if kind in task_kinds(),
+      do: Tasks.validate(kind, value, cache, cache_options),
+      else: Protocol.validate(kind, value, cache, cache_options)
   end
 
   @doc "Validates a protocol value, raising a schema validation exception when it is invalid."
@@ -66,6 +104,14 @@ defmodule TamaMCP.Conformance do
   @doc "Returns the immutable Phase 1 wire fixtures bundled with TamaMCP."
   @spec fixtures() :: [map()]
   def fixtures, do: @fixtures
+
+  @doc "Returns the immutable Phase 2 Tasks wire fixtures bundled with TamaMCP."
+  @spec phase2_fixtures() :: [map()]
+  def phase2_fixtures, do: @phase2_fixtures
+
+  @doc "Returns the complete immutable Phase 1 and Phase 2 fixture set."
+  @spec all_fixtures() :: [map()]
+  def all_fixtures, do: @fixtures ++ @phase2_fixtures
 
   @doc "Runs every supplied fixture through an application request callback."
   @spec run((map() -> map()), module(), [map()], keyword()) :: :ok | {:error, [String.t()]}
@@ -107,7 +153,7 @@ defmodule TamaMCP.Conformance do
     |> verify_schema(
       fixture["responseSchema"],
       true,
-      response[:body],
+      at_path(response[:body], fixture["responsePath"]),
       cache,
       cache_options
     )
@@ -138,4 +184,25 @@ defmodule TamaMCP.Conformance do
       {false, :ok} -> ["#{name} unexpectedly matches the pinned schema" | errors]
     end
   end
+
+  defp task_kinds do
+    [
+      :cancel_task_request,
+      :cancel_task_result,
+      :cancelled_task,
+      :completed_task,
+      :create_task_result,
+      :detailed_task,
+      :failed_task,
+      :get_task_request,
+      :get_task_result,
+      :input_required_task,
+      :update_task_request,
+      :update_task_result,
+      :working_task
+    ]
+  end
+
+  defp at_path(value, nil), do: value
+  defp at_path(value, path) when is_list(path), do: get_in(value, path)
 end

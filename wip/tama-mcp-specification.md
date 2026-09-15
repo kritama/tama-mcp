@@ -1,6 +1,7 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: Phase 1 implemented; Phases 2-5 pending
+Status: Phase 1 implemented; Phase 2 implementation in progress; Phases 3-5
+pending
 
 This document is the authoritative design contract for the first complete
 `tama_mcp` implementation. It defines the package boundary, supported protocol,
@@ -1227,6 +1228,12 @@ contract without introducing a dependency from TamaMCP back to Tama.
 - `tasks/get`, `tasks/update`, and `tasks/cancel`; and
 - conversion of Tama persistence away from Anubis task structs and
   session-scoped identity.
+
+The Phase 2 feature branch implements the TamaMCP-owned task value, transitions,
+adapter behaviours, server-directed creation, Tasks methods, pinned-schema
+validators, and an initial conformance fixture set. The complete positive and
+negative fixture matrix and application-side persistence and runner adapters
+remain Phase 2 follow-up work.
 
 ### Phase 3: subscriptions and task notifications
 
