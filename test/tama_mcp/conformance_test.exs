@@ -36,7 +36,7 @@ defmodule TamaMCP.ConformanceTest do
                       _fingerprint}
   end
 
-  test "the bundled Phase 1 fixtures pass against the reference server" do
+  test "the bundled core fixtures pass against the reference server" do
     runtime =
       MCPPlug.init(
         server: TamaMCP.TestSupport.Server,
@@ -53,7 +53,7 @@ defmodule TamaMCP.ConformanceTest do
     assert log =~ "TamaMCP unexpected runtime failure: Elixir.RuntimeError"
   end
 
-  test "the bundled Phase 2 fixtures pass against the durable task reference adapters" do
+  test "the bundled task fixtures pass against the durable task reference adapters" do
     {:ok, store} = Store.start_link()
 
     runtime =
@@ -71,17 +71,17 @@ defmodule TamaMCP.ConformanceTest do
 
     assert :ok =
              Conformance.run(
-               &phase2_request(&1, runtime, store),
+               &task_request(&1, runtime, store),
                TamaMCP.TestSupport.Cache,
-               Conformance.phase2_fixtures()
+               Conformance.tasks_fixtures()
              )
 
     assert length(Conformance.all_fixtures()) ==
-             length(Conformance.fixtures()) + length(Conformance.phase2_fixtures())
+             length(Conformance.core_fixtures()) + length(Conformance.tasks_fixtures())
   end
 
   test "task validators are restored through the host cache adapter" do
-    fixture = hd(Conformance.phase2_fixtures())
+    fixture = hd(Conformance.tasks_fixtures())
 
     assert :ok =
              Conformance.validate(
@@ -150,7 +150,7 @@ defmodule TamaMCP.ConformanceTest do
     }
   end
 
-  defp phase2_request(
+  defp task_request(
          %{"body" => %{"method" => "tasks/update"}} = task_request,
          runtime,
          store
@@ -173,7 +173,7 @@ defmodule TamaMCP.ConformanceTest do
     request(task_request, runtime)
   end
 
-  defp phase2_request(task_request, runtime, _store), do: request(task_request, runtime)
+  defp task_request(task_request, runtime, _store), do: request(task_request, runtime)
 
   defp elicitation_request do
     %{

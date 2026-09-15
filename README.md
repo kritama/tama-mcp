@@ -151,8 +151,8 @@ values are opaque Erlang terms and may contain functions.
 
 ## Conformance
 
-`TamaMCP.Conformance` validates complete Phase 1 and Phase 2 requests and
-responses against the immutable upstream schemas in
+`TamaMCP.Conformance` validates complete core and Tasks requests and responses
+against the immutable upstream schemas in
 `priv/protocol/2026-07-28`. Its bundled wire fixtures exercise discovery,
 authorization-aware listing, synchronous and task creation results, task
 lookup/update/cancellation, tool errors, malformed metadata, scope denial,

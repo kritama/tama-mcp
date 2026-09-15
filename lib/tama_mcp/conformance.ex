@@ -7,7 +7,7 @@ defmodule TamaMCP.Conformance do
   TamaMCP. This keeps Tama's composed-server tests on the package's pinned
   protocol revision without exposing the transport's internal codec modules.
 
-  Supported values are complete Phase 1 requests and responses plus the task
+  Supported values are complete core requests and responses plus the task
   requests, task results, and detailed task values defined by the pinned Tasks
   extension.
 
@@ -20,18 +20,18 @@ defmodule TamaMCP.Conformance do
 
   alias TamaMCP.Schema.{Protocol, Tasks}
 
-  @fixture_path Path.expand("../../test/fixtures/protocol/2026-07-28/phase1.json", __DIR__)
-  @phase2_fixture_path Path.expand(
-                         "../../test/fixtures/protocol/2026-07-28/phase2.json",
-                         __DIR__
-                       )
-  @external_resource @fixture_path
-  @external_resource @phase2_fixture_path
-  @fixtures @fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
-  @phase2_fixtures @phase2_fixture_path
-                   |> File.read!()
-                   |> Jason.decode!()
-                   |> Map.fetch!("fixtures")
+  @core_fixture_path Path.expand(
+                       "../../test/fixtures/protocol/2026-07-28/core.json",
+                       __DIR__
+                     )
+  @tasks_fixture_path Path.expand(
+                        "../../test/fixtures/protocol/2026-07-28/tasks.json",
+                        __DIR__
+                      )
+  @external_resource @core_fixture_path
+  @external_resource @tasks_fixture_path
+  @core_fixtures @core_fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
+  @tasks_fixtures @tasks_fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
 
   @kinds %{
     "call_tool_request" => :call_tool_request,
@@ -101,21 +101,25 @@ defmodule TamaMCP.Conformance do
     end
   end
 
-  @doc "Returns the immutable Phase 1 wire fixtures bundled with TamaMCP."
+  @doc "Returns the immutable core wire fixtures bundled with TamaMCP."
   @spec fixtures() :: [map()]
-  def fixtures, do: @fixtures
+  def fixtures, do: @core_fixtures
 
-  @doc "Returns the immutable Phase 2 Tasks wire fixtures bundled with TamaMCP."
-  @spec phase2_fixtures() :: [map()]
-  def phase2_fixtures, do: @phase2_fixtures
+  @doc "Returns the immutable core wire fixtures bundled with TamaMCP."
+  @spec core_fixtures() :: [map()]
+  def core_fixtures, do: @core_fixtures
 
-  @doc "Returns the complete immutable Phase 1 and Phase 2 fixture set."
+  @doc "Returns the immutable Tasks extension wire fixtures bundled with TamaMCP."
+  @spec tasks_fixtures() :: [map()]
+  def tasks_fixtures, do: @tasks_fixtures
+
+  @doc "Returns the complete immutable core and Tasks fixture set."
   @spec all_fixtures() :: [map()]
-  def all_fixtures, do: @fixtures ++ @phase2_fixtures
+  def all_fixtures, do: @core_fixtures ++ @tasks_fixtures
 
   @doc "Runs every supplied fixture through an application request callback."
   @spec run((map() -> map()), module(), [map()], keyword()) :: :ok | {:error, [String.t()]}
-  def run(request, cache, fixtures \\ @fixtures, cache_options \\ [])
+  def run(request, cache, fixtures \\ @core_fixtures, cache_options \\ [])
 
   def run(request, cache, fixtures, cache_options)
       when is_function(request, 1) and is_atom(cache) and is_list(fixtures) and
