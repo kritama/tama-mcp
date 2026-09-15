@@ -19,6 +19,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     default_task_ttl_ms: 86_400_000,
     max_task_ttl_ms: 604_800_000,
     default_poll_interval_ms: 1_000,
+    max_input_request_keys_per_task: 256,
     max_status_message_bytes: 2_048,
     max_error_data_bytes: 8_192,
     max_www_authenticate_bytes: 4_096,
@@ -142,6 +143,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     options = [
       max_status_message_bytes: limits.max_status_message_bytes,
       max_task_ttl_ms: limits.max_task_ttl_ms,
+      max_input_request_keys_per_task: limits.max_input_request_keys_per_task,
       max_result_bytes: limits.max_result_bytes,
       max_error_data_bytes: limits.max_error_data_bytes,
       result_metadata: Result.metadata(runtime.server),

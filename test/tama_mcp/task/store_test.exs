@@ -73,6 +73,32 @@ defmodule TamaMCP.Task.StoreTest do
     assert {:ok, ^failed} = Store.get(task.owner_key, task.id, options)
   end
 
+  test "lifetime input-request key limit rejects without changing durable state", %{
+    options: options
+  } do
+    task = %{task() | input_request_keys: ["approval", "followup"]}
+    validation_options = [cache: Cache, max_input_request_keys_per_task: 2]
+    options = Keyword.put(options, :tama_mcp, task_validation_options: validation_options)
+
+    assert :ok = Task.validate(task, validation_options)
+    assert {:ok, ^task} = Store.create(task, options)
+
+    assert {:error, :invalid_task} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :input_required,
+               %{
+                 input_requests: %{"third" => elicitation_request()},
+                 last_updated_at: later(1)
+               },
+               options
+             )
+
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, options)
+  end
+
   defp task do
     assert {:ok, task} =
              Task.new(%{
@@ -90,4 +116,19 @@ defmodule TamaMCP.Task.StoreTest do
   end
 
   defp later(seconds), do: DateTime.add(@created, seconds, :second)
+
+  defp elicitation_request do
+    %{
+      "method" => "elicitation/create",
+      "params" => %{
+        "message" => "Approve?",
+        "mode" => "form",
+        "requestedSchema" => %{
+          "type" => "object",
+          "properties" => %{"approved" => %{"type" => "boolean"}},
+          "required" => ["approved"]
+        }
+      }
+    }
+  end
 end

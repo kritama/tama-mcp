@@ -13,6 +13,7 @@ defmodule TamaMCP.Task.Validation do
           | {:boolean, atom()}
           | {:bounded_positive_integer, atom(), source(), pos_integer()}
           | {:json_object, atom()}
+          | {:max_items, atom(), source()}
           | {:non_empty_binary, atom()}
           | {:non_negative_integer, atom()}
           | {:not_before, atom(), atom()}
@@ -104,6 +105,13 @@ defmodule TamaMCP.Task.Validation do
   defp check(validation, {:json_object, field}) do
     candidate = value(validation, field)
     is_map(candidate) and JSON.value?(candidate)
+  end
+
+  defp check(validation, {:max_items, field, maximum_source}) do
+    candidate = value(validation, field)
+    maximum = value(validation, maximum_source)
+
+    is_list(candidate) and positive_integer?(maximum) and length(candidate) <= maximum
   end
 
   defp check(validation, {:non_empty_binary, field}) do

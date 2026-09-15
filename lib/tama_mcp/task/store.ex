@@ -18,7 +18,8 @@ defmodule TamaMCP.Task.Store do
   tool for output-schema validation. The adapter must pass those options to
   task construction and transitions so state-specific payloads are schema-valid
   before commit. It must also persist the task's issued input-request key
-  history so keys cannot be reused across transitions.
+  history so keys cannot be reused across transitions, and reject transitions
+  that exceed the configured lifetime-key limit.
 
   `create/2` must atomically reject an existing `{owner_key, task_id}` and make
   a successful task immediately visible to owner-bound `get/3` calls.

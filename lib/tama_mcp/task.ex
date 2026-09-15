@@ -66,6 +66,7 @@ defmodule TamaMCP.Task do
     {:optional_utf8_bytes, :status_message, {:option, :max_status_message_bytes, 2_048}},
     {:optional_json_object, :original_params},
     {:unique_binary_list, :input_request_keys},
+    {:max_items, :input_request_keys, {:option, :max_input_request_keys_per_task, 256}},
     {:boolean, :cancellation_requested},
     {:non_negative_integer, :revision}
   ]
@@ -239,7 +240,7 @@ defmodule TamaMCP.Task do
           revision: task.revision + 1
         })
 
-      with {:ok, candidate} <- state_payload(candidate, status, attributes),
+      with {:ok, candidate} <- state_payload(candidate, status, attributes, options),
            :ok <- validate(candidate, options) do
         {:ok, candidate}
       end
@@ -248,13 +249,14 @@ defmodule TamaMCP.Task do
     end
   end
 
-  defp state_payload(task, :working, _attributes),
+  defp state_payload(task, :working, _attributes, _options),
     do: {:ok, %{task | input_requests: nil, result: nil, error: nil}}
 
-  defp state_payload(task, :input_required, attributes) do
+  defp state_payload(task, :input_required, attributes, options) do
     requests = Map.get(attributes, :input_requests, task.input_requests)
+    maximum = Keyword.get(options, :max_input_request_keys_per_task, 256)
 
-    with {:ok, keys} <- issue_input_request_keys(task, requests) do
+    with {:ok, keys} <- issue_input_request_keys(task, requests, maximum) do
       {:ok,
        %{
          task
@@ -266,23 +268,24 @@ defmodule TamaMCP.Task do
     end
   end
 
-  defp state_payload(task, :completed, attributes),
+  defp state_payload(task, :completed, attributes, _options),
     do: {:ok, %{task | input_requests: nil, result: attributes[:result], error: nil}}
 
-  defp state_payload(task, :failed, attributes),
+  defp state_payload(task, :failed, attributes, _options),
     do: {:ok, %{task | input_requests: nil, result: nil, error: attributes[:error]}}
 
-  defp state_payload(task, :cancelled, _attributes),
+  defp state_payload(task, :cancelled, _attributes, _options),
     do: {:ok, %{task | input_requests: nil, result: nil, error: nil}}
 
-  defp issue_input_request_keys(task, requests)
-       when is_list(task.input_request_keys) and is_map(requests) do
+  defp issue_input_request_keys(task, requests, maximum)
+       when is_list(task.input_request_keys) and is_map(requests) and is_integer(maximum) and
+              maximum > 0 do
     current = if is_map(task.input_requests), do: task.input_requests, else: %{}
 
     requests
     |> Enum.reduce_while(
       {:ok, MapSet.new(task.input_request_keys)},
-      &record_input_request_key(&1, &2, current)
+      &record_input_request_key(&1, &2, current, maximum)
     )
     |> case do
       {:ok, issued} -> {:ok, issued |> Enum.to_list() |> Enum.sort()}
@@ -290,14 +293,20 @@ defmodule TamaMCP.Task do
     end
   end
 
-  defp issue_input_request_keys(task, _requests), do: {:ok, task.input_request_keys}
+  defp issue_input_request_keys(_task, _requests, _maximum), do: {:error, :invalid_task}
 
-  defp record_input_request_key({key, request}, {:ok, issued}, current) do
+  defp record_input_request_key({key, request}, {:ok, issued}, current, maximum) do
     case {Map.fetch(current, key), MapSet.member?(issued, key)} do
       {{:ok, ^request}, _issued?} -> {:cont, {:ok, issued}}
       {_new_or_changed, true} -> {:halt, {:error, :invalid_task}}
-      {_new_or_changed, false} -> {:cont, {:ok, MapSet.put(issued, key)}}
+      {_new_or_changed, false} -> record_new_input_request_key(key, issued, maximum)
     end
+  end
+
+  defp record_new_input_request_key(key, issued, maximum) do
+    if MapSet.size(issued) < maximum,
+      do: {:cont, {:ok, MapSet.put(issued, key)}},
+      else: {:halt, {:error, :invalid_task}}
   end
 
   defp terminal_replay(task, next_status, attributes) do

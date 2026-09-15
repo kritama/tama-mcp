@@ -40,6 +40,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.limits.max_body_bytes == 1_048_576
       assert runtime.limits.max_result_bytes == 1_048_576
       assert runtime.limits.max_tools_per_server == 256
+      assert runtime.limits.max_input_request_keys_per_task == 256
       assert runtime.limits.max_www_authenticate_bytes == 4_096
       assert runtime.limits.request_timeout_ms == 30_000
     end
@@ -220,6 +221,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(@valid ++ [limits: [max_body_bytes: 0]])
       end
 
+      assert_raise ArgumentError, ~r/positive integer/, fn ->
+        Runtime.build(@valid ++ [limits: [max_input_request_keys_per_task: 0]])
+      end
+
       assert_raise ArgumentError, ~r/at least 2/, fn ->
         Runtime.build(@valid ++ [limits: [max_safe_metadata_bytes: 1]])
       end
@@ -302,6 +307,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.limits.default_task_ttl_ms == 86_400_000
       assert runtime.limits.max_task_ttl_ms == 604_800_000
       assert runtime.limits.default_poll_interval_ms == 1_000
+      assert runtime.limits.max_input_request_keys_per_task == 256
       assert runtime.limits.max_status_message_bytes == 2_048
 
       assert_raise ArgumentError, ~r/cannot exceed/, fn ->

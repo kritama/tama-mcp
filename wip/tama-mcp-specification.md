@@ -902,7 +902,9 @@ The task store must preserve timestamps, TTL, suggested polling interval,
 status message, original request correlation, and the state-specific result,
 error, or input requests required by the protocol. It must also preserve every
 issued input-request key for the task's lifetime and reject reuse after a key is
-no longer outstanding.
+no longer outstanding. The retained history is capped by
+`max_input_request_keys_per_task`; a transition that would exceed the cap is
+rejected before persistence.
 
 Task TTL and polling values must remain within the Tasks schema's maximum safe
 integer `9_007_199_254_740_991`, even when a host raises runtime limits.
@@ -928,9 +930,9 @@ transaction boundaries.
 Task-store errors must be bounded package values. Raw changesets, database
 exceptions, or adapter-specific structs must never enter JSON responses.
 
-Transport calls include the effective task TTL, status-message, result, and
-error-data bounds plus server result metadata in a reserved `:tama_mcp` adapter
-option. Stores must pass those validation options to
+Transport calls include the effective task TTL, lifetime input-request key,
+status-message, result, and error-data bounds plus server result metadata in a
+reserved `:tama_mcp` adapter option. Stores must pass those validation options to
 `TamaMCP.Task.transition/4`; runners receive the same options for
 `TamaMCP.Task.new/2`. Task validation checks the complete encoded `tasks/get`
 result before a state commit. It also validates `input_required` payloads
@@ -1137,6 +1139,7 @@ The initial production defaults are:
 | `default_task_ttl_ms` | `86_400_000` | default task lifetime of 24 hours |
 | `max_task_ttl_ms` | `604_800_000` | maximum task lifetime of 7 days |
 | `default_poll_interval_ms` | `1_000` | task polling guidance |
+| `max_input_request_keys_per_task` | `256` | maximum distinct input-request keys issued over one task lifetime |
 | `max_task_ids_per_subscription` | `100` | maximum task IDs requested on one stream |
 | `notification_buffer_capacity` | `100` | maximum queued task snapshots per stream |
 | `stream_keepalive_interval_ms` | `15_000` | SSE keepalive comment interval |

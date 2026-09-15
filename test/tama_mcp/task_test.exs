@@ -84,13 +84,14 @@ defmodule TamaMCP.TaskTest do
 
   test "records input-request keys for the lifetime of the task" do
     requests = %{"approval" => elicitation_request()}
+    options = validation_options(max_input_request_keys_per_task: 2)
 
     assert {:ok, waiting} =
              Task.transition(
                task(),
                :input_required,
                %{input_requests: requests, last_updated_at: @later},
-               validation_options()
+               options
              )
 
     assert waiting.input_request_keys == ["approval"]
@@ -100,7 +101,7 @@ defmodule TamaMCP.TaskTest do
                waiting,
                :input_required,
                %{status_message: "Still waiting.", last_updated_at: later(2)},
-               validation_options()
+               options
              )
 
     assert waiting.input_request_keys == ["approval"]
@@ -110,7 +111,7 @@ defmodule TamaMCP.TaskTest do
                waiting,
                :working,
                %{last_updated_at: later(3)},
-               validation_options()
+               options
              )
 
     assert {:error, :invalid_task} =
@@ -118,7 +119,7 @@ defmodule TamaMCP.TaskTest do
                working,
                :input_required,
                %{input_requests: requests, last_updated_at: later(4)},
-               validation_options()
+               options
              )
 
     assert {:ok, next_request} =
@@ -129,11 +130,30 @@ defmodule TamaMCP.TaskTest do
                  input_requests: %{"followup" => elicitation_request()},
                  last_updated_at: later(4)
                },
-               validation_options()
+               options
              )
 
     assert next_request.input_request_keys == ["approval", "followup"]
     refute Map.has_key?(Task.get_result(next_request), "inputRequestKeys")
+
+    assert {:ok, working} =
+             Task.transition(
+               next_request,
+               :working,
+               %{last_updated_at: later(5)},
+               options
+             )
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               working,
+               :input_required,
+               %{
+                 input_requests: %{"third" => elicitation_request()},
+                 last_updated_at: later(6)
+               },
+               options
+             )
   end
 
   test "encodes every detailed task variant against the pinned schema" do
