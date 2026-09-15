@@ -128,10 +128,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
 
   defp validate_task(task, owner_key, identifier, runtime) do
     if task.owner_key == owner_key and task.id == identifier do
-      Task.validate(task,
-        max_status_message_bytes: runtime.limits.max_status_message_bytes,
-        max_task_ttl_ms: runtime.limits.max_task_ttl_ms
-      )
+      Task.validate(task, Runtime.task_validation_options(runtime))
     else
       {:error, :invalid_task}
     end

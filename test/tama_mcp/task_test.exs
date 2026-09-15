@@ -160,6 +160,33 @@ defmodule TamaMCP.TaskTest do
 
     assert {:error, :invalid_task} =
              Task.transition(task(), :working, last_updated_at: @created)
+
+    unsafe_integer = 9_007_199_254_740_992
+
+    assert {:error, :invalid_task} =
+             Task.new(Map.put(attributes(), :ttl_ms, unsafe_integer),
+               max_task_ttl_ms: unsafe_integer
+             )
+
+    assert {:error, :invalid_task} =
+             Task.new(Map.put(attributes(), :poll_interval_ms, unsafe_integer))
+  end
+
+  test "rejects a transition whose detailed wire result exceeds its bound" do
+    oversized = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => String.duplicate("x", 1_024)}],
+      "isError" => false
+    }
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               task(),
+               :completed,
+               %{result: oversized, last_updated_at: @later},
+               max_result_bytes: 512,
+               result_metadata: %{"io.modelcontextprotocol/serverInfo" => %{"name" => "test"}}
+             )
   end
 
   defp task do

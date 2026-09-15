@@ -31,6 +31,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   alias TamaMCP.{Error, Protocol, Task}
   alias TamaMCP.TestSupport.Tasks.Store
   alias TamaMCP.Transport.StreamableHTTP.Plug, as: MCPPlug
+  alias TamaMCP.Transport.StreamableHTTP.Runtime
 
   @version Protocol.version()
   @missing_capability Protocol.error_code(:missing_required_client_capability)
@@ -161,6 +162,25 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert conn.status == 500
     assert get_in(decode(conn), ["error", "code"]) == @internal
     refute conn.resp_body =~ "ownerless-principal"
+  end
+
+  test "task execution rejects an ownerless decision before invoking the runner", %{
+    runtime: runtime,
+    store: store
+  } do
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+        name: "task_required",
+        token: "ownerless"
+      )
+
+    assert conn.status == 500
+    assert get_in(decode(conn), ["error", "code"]) == @internal
+    refute_receive {:task_started, _, _, _, _}
+    assert {:error, :not_found} = Store.get(nil, "task-phase2-1", agent: store)
   end
 
   test "tasks/update accepts only outstanding input response keys", %{
@@ -396,6 +416,31 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     task = create_task(runtime)
 
     assert task.ttl_ms == 691_200_000
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, agent: store)
+  end
+
+  test "store transitions reject task results that exceed the transport result bound", %{
+    store: store
+  } do
+    runtime = runtime(store, self(), limits: [max_result_bytes: 1_024])
+    task = create_task(runtime)
+
+    oversized = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => String.duplicate("x", 2_048)}],
+      "isError" => false
+    }
+
+    assert {:error, :invalid_task} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :completed,
+               %{result: oversized, last_updated_at: @later},
+               Runtime.effective_task_store_options(runtime)
+             )
+
     assert {:ok, ^task} = Store.get(task.owner_key, task.id, agent: store)
   end
 

@@ -310,6 +310,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
             [limits: [default_task_ttl_ms: 2_000, max_task_ttl_ms: 1_000]]
         )
       end
+
+      for key <- [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] do
+        assert_raise ArgumentError, ~r/positive protocol-safe integer/, fn ->
+          Runtime.build(@valid ++ [limits: [{key, 9_007_199_254_740_992}]])
+        end
+      end
     end
 
     test "rejects a server containing a task-required tool" do
@@ -331,7 +337,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(@valid ++ [task_runner: TamaMCP.TestSupport.Tasks.Runner])
       end
 
-      assert_raise ArgumentError, ~r/does not implement TamaMCP.TaskStore/, fn ->
+      assert_raise ArgumentError, ~r/does not implement TamaMCP.Task.Store/, fn ->
         Runtime.build(
           @valid ++
             [task_store: @plain, task_runner: TamaMCP.TestSupport.Tasks.Runner]

@@ -7,6 +7,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   """
 
   alias __MODULE__.Validation
+  alias TamaMCP.Transport.StreamableHTTP.Result
 
   @default_limits %{
     max_body_bytes: 1_048_576,
@@ -137,10 +138,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
 
   @doc false
   @spec task_validation_options(t()) :: keyword()
-  def task_validation_options(%__MODULE__{limits: limits}) do
+  def task_validation_options(%__MODULE__{limits: limits} = runtime) do
     [
       max_status_message_bytes: limits.max_status_message_bytes,
-      max_task_ttl_ms: limits.max_task_ttl_ms
+      max_task_ttl_ms: limits.max_task_ttl_ms,
+      max_result_bytes: limits.max_result_bytes,
+      max_error_data_bytes: limits.max_error_data_bytes,
+      result_metadata: Result.metadata(runtime.server)
     ]
   end
 

@@ -21,7 +21,7 @@ end
 defmodule TamaMCP.TestSupport.Tasks.Store do
   @moduledoc false
 
-  @behaviour TamaMCP.TaskStore
+  @behaviour TamaMCP.Task.Store
 
   alias TamaMCP.Task
 
@@ -117,7 +117,7 @@ end
 defmodule TamaMCP.TestSupport.Tasks.Runner do
   @moduledoc false
 
-  @behaviour TamaMCP.TaskRunner
+  @behaviour TamaMCP.Task.Runner
 
   alias TamaMCP.Task
   alias TamaMCP.TestSupport.Tasks.Store

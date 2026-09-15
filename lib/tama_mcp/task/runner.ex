@@ -1,9 +1,9 @@
-defmodule TamaMCP.TaskRunner do
+defmodule TamaMCP.Task.Runner do
   @moduledoc """
   Application-owned atomic handoff from a validated tool call to durable work.
 
   Returning `{:ok, task}` asserts that the task is durably visible through the
-  configured `TamaMCP.TaskStore`, its execution handoff has been accepted, and
+  configured `TamaMCP.Task.Store`, its execution handoff has been accepted, and
   the returned task is in `working`. Returning an error asserts that no task
   handle was exposed and no unreconciled externally visible task remains.
 

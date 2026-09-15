@@ -10,6 +10,7 @@ defmodule TamaMCP.Task do
 
   @statuses [:working, :input_required, :completed, :failed, :cancelled]
   @terminal [:completed, :failed, :cancelled]
+  @maximum_protocol_integer 9_007_199_254_740_991
   @transitions %{
     working: [:input_required, :completed, :failed, :cancelled],
     input_required: [:working, :completed, :failed, :cancelled],
@@ -99,13 +100,20 @@ defmodule TamaMCP.Task do
     _exception -> {:error, :invalid_task}
   end
 
-  @doc "Validates the package task invariant."
+  @doc """
+  Validates the package task invariant.
+
+  In addition to task metadata and state, validation bounds the complete
+  encoded `tasks/get` result. Runtime adapters receive the effective result
+  limit, error-data limit, and server metadata through their reserved
+  validation options.
+  """
   @spec validate(t(), keyword()) :: :ok | {:error, :invalid_task}
   def validate(%__MODULE__{} = task, options \\ []) do
     maximum = Keyword.get(options, :max_status_message_bytes, 2_048)
     maximum_ttl = Keyword.get(options, :max_task_ttl_ms, 604_800_000)
 
-    if common?(task, maximum, maximum_ttl) and payload?(task),
+    if common?(task, maximum, maximum_ttl) and payload?(task) and result_size?(task, options),
       do: :ok,
       else: {:error, :invalid_task}
   end
@@ -239,9 +247,12 @@ defmodule TamaMCP.Task do
   end
 
   defp timing?(task, maximum_ttl) do
-    is_integer(task.ttl_ms) and task.ttl_ms > 0 and task.ttl_ms <= maximum_ttl and
+    is_integer(maximum_ttl) and maximum_ttl > 0 and
+      is_integer(task.ttl_ms) and task.ttl_ms > 0 and
+      task.ttl_ms <= min(maximum_ttl, @maximum_protocol_integer) and
       (is_nil(task.poll_interval_ms) or
-         (is_integer(task.poll_interval_ms) and task.poll_interval_ms > 0))
+         (is_integer(task.poll_interval_ms) and task.poll_interval_ms > 0 and
+            task.poll_interval_ms <= @maximum_protocol_integer))
   end
 
   defp metadata?(task, maximum) do
@@ -270,6 +281,25 @@ defmodule TamaMCP.Task do
 
   defp payload?(%__MODULE__{status: :cancelled} = task),
     do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)
+
+  defp result_size?(task, options) do
+    maximum = Keyword.get(options, :max_result_bytes, 1_048_576)
+    maximum_error = Keyword.get(options, :max_error_data_bytes, 8_192)
+    metadata = Keyword.get(options, :result_metadata, %{})
+
+    result =
+      task
+      |> get_result(maximum_error)
+      |> put_result_metadata(metadata)
+
+    is_integer(maximum) and maximum > 0 and is_map(metadata) and JSON.value?(metadata) and
+      match?({:ok, encoded} when byte_size(encoded) <= maximum, Jason.encode(result))
+  rescue
+    _exception -> false
+  end
+
+  defp put_result_metadata(result, metadata) when map_size(metadata) == 0, do: result
+  defp put_result_metadata(result, metadata), do: Map.put(result, "_meta", metadata)
 
   defp status_message?(nil, _maximum), do: true
 

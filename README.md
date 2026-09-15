@@ -134,9 +134,9 @@ forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
   task_runner_options: [supervisor: Example.TaskSupervisor]
 ```
 
-The runner's `c:TamaMCP.TaskRunner.start/4` callback is the atomic durability
+The runner's `c:TamaMCP.Task.Runner.start/4` callback is the atomic durability
 boundary: before returning a task handle it must persist a `TamaMCP.Task` and
-accept its execution handoff. `TamaMCP.TaskStore` owns owner-bound lookup,
+accept its execution handoff. `TamaMCP.Task.Store` owns owner-bound lookup,
 compare-and-update transitions, input responses, and cooperative cancellation.
 The default UTC clock and opaque UUID generator can be replaced for application
 or test needs. Optional tools remain synchronous unless `:task_selector`

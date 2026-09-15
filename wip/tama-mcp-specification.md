@@ -166,8 +166,8 @@ TamaMCP.Protocol
 TamaMCP.Response
 TamaMCP.Server
 TamaMCP.Task
-TamaMCP.TaskRunner
-TamaMCP.TaskStore
+TamaMCP.Task.Runner
+TamaMCP.Task.Store
 TamaMCP.Tool
 TamaMCP.Transport.StreamableHTTP.Plug
 ```
@@ -854,6 +854,9 @@ There is no protocol session in 2026. Task lookup must therefore never use
 task store must bind access to an application-defined owner key derived from the
 validated principal and resource.
 
+Task-producing tool calls must reject a missing owner key before invoking the
+task runner, generating durable work, or exposing a task handle.
+
 Unauthorized and nonexistent tasks should produce the same externally visible
 error wherever the specification permits, preventing task-existence probing.
 
@@ -899,6 +902,9 @@ The task store must preserve timestamps, TTL, suggested polling interval,
 status message, original request correlation, and the state-specific result,
 error, or input requests required by the protocol.
 
+Task TTL and polling values must remain within the Tasks schema's maximum safe
+integer `9_007_199_254_740_991`, even when a host raises runtime limits.
+
 A tool result with `isError: true` is still a completed tool call under the
 Tasks extension. JSON-RPC execution failure uses task status `failed`. The
 library must not conflate these two failure channels.
@@ -909,7 +915,7 @@ state.
 
 ### 13.3 Task store behaviour
 
-`TamaMCP.TaskStore` defines the protocol-facing persistence contract. It must
+`TamaMCP.Task.Store` defines the protocol-facing persistence contract. It must
 support atomic creation, authorized lookup, compare-and-update transitions,
 and cooperative cancellation intent.
 
@@ -920,15 +926,18 @@ transaction boundaries.
 Task-store errors must be bounded package values. Raw changesets, database
 exceptions, or adapter-specific structs must never enter JSON responses.
 
-Transport calls include the effective task TTL and status-message bounds in a
-reserved `:tama_mcp` adapter option. Stores must pass those validation options
-to `TamaMCP.Task.transition/4`; runners receive the same options for
-`TamaMCP.Task.new/2`. This keeps explicitly raised or lowered runtime limits
-consistent at construction, persistence, lookup, and transition boundaries.
+Transport calls include the effective task TTL, status-message, result, and
+error-data bounds plus server result metadata in a reserved `:tama_mcp` adapter
+option. Stores must pass those validation options to
+`TamaMCP.Task.transition/4`; runners receive the same options for
+`TamaMCP.Task.new/2`. Task validation checks the complete encoded `tasks/get`
+result before a state commit. This keeps explicitly raised or lowered runtime
+limits consistent at construction, persistence, lookup, transition, and wire
+recovery boundaries.
 
 ### 13.4 Task runner behaviour
 
-`TamaMCP.TaskRunner` defines the application-owned handoff from a validated
+`TamaMCP.Task.Runner` defines the application-owned handoff from a validated
 task-producing tool call to durable execution:
 
 ~~~elixir

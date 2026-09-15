@@ -1,4 +1,4 @@
-defmodule TamaMCP.TaskStore do
+defmodule TamaMCP.Task.Store do
   @moduledoc """
   Durable, owner-bound storage contract for MCP tasks.
 
@@ -13,8 +13,8 @@ defmodule TamaMCP.TaskStore do
   holding its write lock, and persist the returned task atomically.
 
   Transport calls add a reserved `:tama_mcp` keyword to the configured options.
-  Its `:task_validation_options` value contains the effective task bounds the
-  adapter must pass to task construction and transitions.
+  Its `:task_validation_options` value contains the effective task and encoded
+  result bounds the adapter must pass to task construction and transitions.
 
   `create/2` must atomically reject an existing `{owner_key, task_id}` and make
   a successful task immediately visible to owner-bound `get/3` calls.

@@ -167,6 +167,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     _kind, _reason -> {:error, :task_selector_exception}
   end
 
+  defp run_task(conn, request, _module, _arguments, %Context{owner_key: nil}, runtime, base) do
+    unexpected(conn, request, runtime, base, :missing_owner_key)
+  end
+
   defp run_task(conn, request, module, arguments, context, runtime, base) do
     with {:ok, identifier} <- Identifier.generate(runtime.identifier, runtime.identifier_options),
          {:ok, now} <- Clock.now(runtime.clock, runtime.clock_options),
@@ -235,10 +239,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
         task.original_params == request.params
 
     if valid? do
-      Task.validate(task,
-        max_status_message_bytes: runtime.limits.max_status_message_bytes,
-        max_task_ttl_ms: runtime.limits.max_task_ttl_ms
-      )
+      Task.validate(task, Runtime.task_validation_options(runtime))
     else
       {:error, :invalid_task}
     end

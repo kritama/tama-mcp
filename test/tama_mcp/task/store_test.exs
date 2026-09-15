@@ -1,4 +1,4 @@
-defmodule TamaMCP.TaskStoreTest do
+defmodule TamaMCP.Task.StoreTest do
   use ExUnit.Case
 
   alias TamaMCP.{Error, Task}

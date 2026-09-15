@@ -5,6 +5,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   alias TamaMCP.Transport.StreamableHTTP.{Result, Runtime, Wire}
 
   @min_www_authenticate_bytes Challenge.minimum_size()
+  @maximum_protocol_integer 9_007_199_254_740_991
 
   def options!(opts, allowed) do
     unless Keyword.keyword?(opts) do
@@ -154,11 +155,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
 
   defp task_pair!(store, runner, _selector) do
     unless exports?(store, create: 2, get: 3, transition: 6, update: 4, cancel: 3) do
-      raise ArgumentError, "task_store: #{inspect(store)} does not implement TamaMCP.TaskStore"
+      raise ArgumentError,
+            "task_store: #{inspect(store)} does not implement TamaMCP.Task.Store"
     end
 
     unless exports?(runner, start: 4) do
-      raise ArgumentError, "task_runner: #{inspect(runner)} does not implement TamaMCP.TaskRunner"
+      raise ArgumentError,
+            "task_runner: #{inspect(runner)} does not implement TamaMCP.Task.Runner"
     end
   end
 
@@ -291,6 +294,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     raise ArgumentError,
           "limit :max_www_authenticate_bytes must be an integer of at least " <>
             "#{@min_www_authenticate_bytes}, got: #{inspect(value)}"
+  end
+
+  defp positive!(key, value)
+       when key in [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] and
+              is_integer(value) and value > 0 and value <= @maximum_protocol_integer,
+       do: value
+
+  defp positive!(key, value)
+       when key in [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] do
+    raise ArgumentError,
+          "limit #{inspect(key)} must be a positive protocol-safe integer no greater than " <>
+            "#{@maximum_protocol_integer}, got: #{inspect(value)}"
   end
 
   defp positive!(_key, value) when is_integer(value) and value > 0, do: value
