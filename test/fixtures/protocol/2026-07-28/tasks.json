@@ -1,0 +1,303 @@
+{
+  "fixtures": [
+    {
+      "name": "tools/call task creation",
+      "requestSchema": "call_tool_request",
+      "requestValid": true,
+      "responseSchema": "create_task_result",
+      "responsePath": ["result"],
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tools/call"],
+          ["mcp-name", "task_required"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-create-1",
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {
+                "extensions": {"io.modelcontextprotocol/tasks": {}},
+                "elicitation": {"form": {}}
+              },
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "name": "task_required",
+            "arguments": {"value": "hello"}
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-create-1",
+          "result": {
+            "resultType": "task",
+            "taskId": "task-phase2-1",
+            "status": "working",
+            "statusMessage": "Queued for durable execution.",
+            "createdAt": "2026-09-14T12:00:00Z",
+            "lastUpdatedAt": "2026-09-14T12:00:00Z",
+            "ttlMs": 86400000,
+            "pollIntervalMs": 1000,
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-task-required",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tools/call task creation missing capability",
+      "requestSchema": "call_tool_request",
+      "requestValid": true,
+      "responseSchema": "error_response",
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tools/call"],
+          ["mcp-name", "task_required"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-create-missing-capability",
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "name": "task_required",
+            "arguments": {"value": "hello"}
+          }
+        }
+      },
+      "expected": {
+        "status": 400,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-create-missing-capability",
+          "error": {
+            "code": -32021,
+            "message": "Server requires the extensions capability for this request",
+            "data": {"requiredCapabilities": {"extensions": {"io.modelcontextprotocol/tasks": {}}}}
+          }
+        }
+      }
+    },
+    {
+      "name": "tasks/get working",
+      "requestSchema": "get_task_request",
+      "requestValid": true,
+      "responseSchema": "get_task_result",
+      "responsePath": ["result"],
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tasks/get"],
+          ["mcp-name", "task-phase2-1"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-get-1",
+          "method": "tasks/get",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {
+                "extensions": {"io.modelcontextprotocol/tasks": {}}
+              },
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "taskId": "task-phase2-1"
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-get-1",
+          "result": {
+            "resultType": "complete",
+            "taskId": "task-phase2-1",
+            "status": "working",
+            "statusMessage": "Queued for durable execution.",
+            "createdAt": "2026-09-14T12:00:00Z",
+            "lastUpdatedAt": "2026-09-14T12:00:00Z",
+            "ttlMs": 86400000,
+            "pollIntervalMs": 1000,
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-task-required",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tasks/get unknown or unauthorized",
+      "requestSchema": "get_task_request",
+      "requestValid": true,
+      "responseSchema": "error_response",
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tasks/get"],
+          ["mcp-name", "missing-task"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-get-missing",
+          "method": "tasks/get",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {
+                "extensions": {"io.modelcontextprotocol/tasks": {}}
+              },
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "taskId": "missing-task"
+          }
+        }
+      },
+      "expected": {
+        "status": 400,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-get-missing",
+          "error": {"code": -32602, "message": "Task was not found"}
+        }
+      }
+    },
+    {
+      "name": "tasks/update partial input responses",
+      "setup": "input_required",
+      "requestSchema": "update_task_request",
+      "requestValid": true,
+      "responseSchema": "update_task_result",
+      "responsePath": ["result"],
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tasks/update"],
+          ["mcp-name", "task-phase2-1"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-update-1",
+          "method": "tasks/update",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {
+                "extensions": {"io.modelcontextprotocol/tasks": {}}
+              },
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "taskId": "task-phase2-1",
+            "inputResponses": {
+              "approval": {"action": "accept", "content": {"approved": true}}
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-update-1",
+          "result": {
+            "resultType": "complete",
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-task-required",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tasks/cancel cooperative acknowledgement",
+      "requestSchema": "cancel_task_request",
+      "requestValid": true,
+      "responseSchema": "cancel_task_result",
+      "responsePath": ["result"],
+      "request": {
+        "headers": [
+          ["mcp-protocol-version", "2026-07-28"],
+          ["mcp-method", "tasks/cancel"],
+          ["mcp-name", "task-phase2-1"],
+          ["content-type", "application/json"],
+          ["accept", "application/json, text/event-stream"],
+          ["x-test-token", "ok"]
+        ],
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-cancel-1",
+          "method": "tasks/cancel",
+          "params": {
+            "_meta": {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {
+                "extensions": {"io.modelcontextprotocol/tasks": {}}
+              },
+              "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0.0"}
+            },
+            "taskId": "task-phase2-1"
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": {
+          "jsonrpc": "2.0",
+          "id": "task-cancel-1",
+          "result": {
+            "resultType": "complete",
+            "_meta": {
+              "io.modelcontextprotocol/serverInfo": {
+                "name": "tama-mcp-task-required",
+                "version": "0.0.1-test"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

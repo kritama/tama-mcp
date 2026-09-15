@@ -5,7 +5,9 @@ defmodule TamaMCP.ConformanceTest do
   import ExUnit.CaptureLog
 
   alias TamaMCP.Conformance
+  alias TamaMCP.TestSupport.Tasks.Store
   alias TamaMCP.Transport.StreamableHTTP.Plug, as: MCPPlug
+  alias TamaMCP.Transport.StreamableHTTP.Runtime
 
   defmodule Cache do
     @moduledoc false
@@ -35,7 +37,7 @@ defmodule TamaMCP.ConformanceTest do
                       _fingerprint}
   end
 
-  test "the bundled Phase 1 fixtures pass against the reference server" do
+  test "the bundled core fixtures pass against the reference server" do
     runtime =
       MCPPlug.init(
         server: TamaMCP.TestSupport.Server,
@@ -50,6 +52,49 @@ defmodule TamaMCP.ConformanceTest do
 
     assert result == :ok
     assert log =~ "TamaMCP unexpected runtime failure: Elixir.RuntimeError"
+  end
+
+  test "the bundled task fixtures pass against the durable task reference adapters" do
+    {:ok, store} = Store.start_link()
+
+    runtime =
+      MCPPlug.init(
+        server: TamaMCP.TestSupport.TaskRequiredServer,
+        authorization: TamaMCP.TestSupport.Authorization,
+        cache: TamaMCP.TestSupport.Cache,
+        task_store: Store,
+        task_store_options: [agent: store, test: self()],
+        task_runner: TamaMCP.TestSupport.Tasks.Runner,
+        task_runner_options: [test: self()],
+        clock: TamaMCP.TestSupport.Tasks.Clock,
+        identifier: TamaMCP.TestSupport.Tasks.Identifier
+      )
+
+    assert :ok =
+             Conformance.run(
+               &task_request(&1, runtime, store),
+               TamaMCP.TestSupport.Cache,
+               Conformance.tasks_fixtures()
+             )
+
+    assert length(Conformance.all_fixtures()) ==
+             length(Conformance.core_fixtures()) + length(Conformance.tasks_fixtures())
+  end
+
+  test "task validators are restored through the host cache adapter" do
+    fixture = hd(Conformance.tasks_fixtures())
+
+    assert :ok =
+             Conformance.validate(
+               :create_task_result,
+               fixture["expected"]["body"]["result"],
+               Cache,
+               test: self()
+             )
+
+    assert_receive {:protocol_cache_fetch,
+                    "tama_mcp:validator:1:Elixir.TamaMCP.Schema.Tasks:create_task_result:" <>
+                      _fingerprint}
   end
 
   test "fixture verification reports response drift without raising" do
@@ -103,6 +148,46 @@ defmodule TamaMCP.ConformanceTest do
       status: conn.status,
       headers: conn.resp_headers,
       body: Jason.decode!(conn.resp_body)
+    }
+  end
+
+  defp task_request(
+         %{"body" => %{"method" => "tasks/update"}} = task_request,
+         runtime,
+         store
+       ) do
+    {:ok, task} = Store.get("test-owner", "task-phase2-1", agent: store)
+
+    {:ok, _task} =
+      Store.transition(
+        task.owner_key,
+        task.id,
+        task.revision,
+        :input_required,
+        %{
+          input_requests: %{"approval" => elicitation_request()},
+          last_updated_at: ~U[2026-09-14 12:00:01Z]
+        },
+        Runtime.effective_task_store_options(runtime)
+      )
+
+    request(task_request, runtime)
+  end
+
+  defp task_request(task_request, runtime, _store), do: request(task_request, runtime)
+
+  defp elicitation_request do
+    %{
+      "method" => "elicitation/create",
+      "params" => %{
+        "message" => "Approve?",
+        "mode" => "form",
+        "requestedSchema" => %{
+          "type" => "object",
+          "properties" => %{"approved" => %{"type" => "boolean"}},
+          "required" => ["approved"]
+        }
+      }
     }
   end
 end

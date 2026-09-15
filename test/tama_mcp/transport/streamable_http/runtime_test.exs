@@ -40,6 +40,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.limits.max_body_bytes == 1_048_576
       assert runtime.limits.max_result_bytes == 1_048_576
       assert runtime.limits.max_tools_per_server == 256
+      assert runtime.limits.max_input_request_keys_per_task == 256
       assert runtime.limits.max_www_authenticate_bytes == 4_096
       assert runtime.limits.request_timeout_ms == 30_000
     end
@@ -220,6 +221,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
         Runtime.build(@valid ++ [limits: [max_body_bytes: 0]])
       end
 
+      assert_raise ArgumentError, ~r/positive integer/, fn ->
+        Runtime.build(@valid ++ [limits: [max_input_request_keys_per_task: 0]])
+      end
+
       assert_raise ArgumentError, ~r/at least 2/, fn ->
         Runtime.build(@valid ++ [limits: [max_safe_metadata_bytes: 1]])
       end
@@ -281,35 +286,41 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
     end
   end
 
-  describe "Phase 1 boundary" do
+  describe "phase boundaries and task configuration" do
     test "rejects unknown top-level options" do
       assert_raise ArgumentError, ~r/unknown option/, fn ->
         Runtime.build(@valid ++ [bogus: true])
       end
     end
 
-    test "rejects every future-phase adapter option" do
-      future = [
-        :clock,
-        :identifier,
-        :task_store,
-        :task_store_options,
-        :task_runner,
-        :task_runner_options,
-        :notification_bus,
-        :notification_bus_options
-      ]
-
-      for option <- future do
+    test "continues to reject Phase 3 notification options" do
+      for option <- [:notification_bus, :notification_bus_options] do
         assert_raise ArgumentError, ~r/unknown option/, fn ->
           Runtime.build(@valid ++ [{option, TamaMCP.TestSupport.Authorization}])
         end
       end
     end
 
-    test "rejects a future-phase limit override" do
-      assert_raise ArgumentError, ~r/unknown limit/, fn ->
-        Runtime.build(@valid ++ [limits: [default_task_ttl_ms: 1_000]])
+    test "provides bounded Phase 2 defaults and validates their relationship" do
+      runtime = Runtime.build(@valid)
+
+      assert runtime.limits.default_task_ttl_ms == 86_400_000
+      assert runtime.limits.max_task_ttl_ms == 604_800_000
+      assert runtime.limits.default_poll_interval_ms == 1_000
+      assert runtime.limits.max_input_request_keys_per_task == 256
+      assert runtime.limits.max_status_message_bytes == 2_048
+
+      assert_raise ArgumentError, ~r/cannot exceed/, fn ->
+        Runtime.build(
+          @valid ++
+            [limits: [default_task_ttl_ms: 2_000, max_task_ttl_ms: 1_000]]
+        )
+      end
+
+      for key <- [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] do
+        assert_raise ArgumentError, ~r/positive protocol-safe integer/, fn ->
+          Runtime.build(@valid ++ [limits: [{key, 9_007_199_254_740_992}]])
+        end
       end
     end
 
@@ -321,6 +332,49 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
           cache: TamaMCP.TestSupport.Cache
         )
       end
+    end
+
+    test "rejects partial and invalid task adapter configuration" do
+      assert_raise ArgumentError, ~r/task_store requires task_runner/, fn ->
+        Runtime.build(@valid ++ [task_store: TamaMCP.TestSupport.Tasks.Store])
+      end
+
+      assert_raise ArgumentError, ~r/task_runner requires task_store/, fn ->
+        Runtime.build(@valid ++ [task_runner: TamaMCP.TestSupport.Tasks.Runner])
+      end
+
+      assert_raise ArgumentError, ~r/does not implement TamaMCP.Task.Store/, fn ->
+        Runtime.build(
+          @valid ++
+            [task_store: @plain, task_runner: TamaMCP.TestSupport.Tasks.Runner]
+        )
+      end
+
+      assert_raise ArgumentError, ~r/task_selector requires/, fn ->
+        Runtime.build(@valid ++ [task_selector: fn _, _, _ -> :sync end])
+      end
+    end
+
+    test "accepts a complete task runtime and task-required tools" do
+      runtime =
+        Runtime.build(
+          server: TamaMCP.TestSupport.TaskRequiredServer,
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
+          task_store: TamaMCP.TestSupport.Tasks.Store,
+          task_runner: TamaMCP.TestSupport.Tasks.Runner,
+          clock: TamaMCP.TestSupport.Tasks.Clock,
+          identifier: TamaMCP.TestSupport.Tasks.Identifier,
+          task_selector: fn _, _, _ -> :task end
+        )
+
+      assert Runtime.task_capable?(runtime)
+      assert is_function(runtime.task_selector, 3)
+
+      assert %{"extensions" => extensions} =
+               Result.discover(runtime.server, true)["capabilities"]
+
+      assert extensions[TamaMCP.tasks_extension()] == %{}
     end
   end
 end

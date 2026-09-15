@@ -3,7 +3,19 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
 
   alias TamaMCP.{JSON, Protocol}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
+  alias TamaMCP.Schema.Tasks, as: TaskSchema
   alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters, Runtime}
+
+  @core_request_schemas %{
+    Protocol.method(:server_discover) => :discover_request,
+    Protocol.method(:tools_list) => :list_tools_request,
+    Protocol.method(:tools_call) => :call_tool_request
+  }
+  @task_request_schemas %{
+    Protocol.method(:tasks_get) => :get_task_request,
+    Protocol.method(:tasks_update) => :update_task_request,
+    Protocol.method(:tasks_cancel) => :cancel_task_request
+  }
 
   defstruct [
     :request_id,
@@ -189,12 +201,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
   end
 
   defp validate_schema(json, method, runtime) do
-    case request_schema(method) do
+    case request_schema(method, runtime) do
       nil ->
         :ok
 
-      kind ->
-        case ProtocolSchema.validate(kind, json, runtime.cache, runtime.cache_options) do
+      {schema, kind} ->
+        case schema.validate(kind, json, runtime.cache, runtime.cache_options) do
           :ok ->
             :ok
 
@@ -209,12 +221,19 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     end
   end
 
-  defp request_schema(method) do
-    cond do
-      method == Protocol.method(:server_discover) -> :discover_request
-      method == Protocol.method(:tools_list) -> :list_tools_request
-      method == Protocol.method(:tools_call) -> :call_tool_request
-      true -> nil
+  defp request_schema(method, runtime) do
+    case Map.fetch(@core_request_schemas, method) do
+      {:ok, kind} -> {ProtocolSchema, kind}
+      :error -> task_request_schema(method, runtime)
+    end
+  end
+
+  defp task_request_schema(method, runtime) do
+    if Runtime.task_capable?(runtime) do
+      case Map.fetch(@task_request_schemas, method) do
+        {:ok, kind} -> {TaskSchema, kind}
+        :error -> nil
+      end
     end
   end
 

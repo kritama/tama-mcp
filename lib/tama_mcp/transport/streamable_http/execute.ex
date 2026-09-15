@@ -1,9 +1,11 @@
 defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   @moduledoc false
 
-  alias TamaMCP.{Context, Error, Protocol, Response, Schema}
+  alias TamaMCP.{Clock, Context, Error, Identifier, Protocol, Response, Schema, Task}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Runner, Wire}
+  alias TamaMCP.Schema.Tasks
+  alias TamaMCP.Task.Validation, as: TaskValidation
+  alias TamaMCP.Transport.StreamableHTTP.{Events, Result, Runner, Runtime, Wire}
 
   @max_detail_bytes 512
 
@@ -13,6 +15,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     with {:ok, name} <- name(request.params),
          {:ok, module} <- tool(runtime.server, name),
          meta = module.tool_metadata(),
+         :ok <- required_capability(module, request),
          {:ok, arguments} <- arguments(request.params),
          :ok <- scopes(meta.scopes, decision.scopes) do
       validate_and_run(conn, request, module, arguments, decision, runtime, base)
@@ -64,6 +67,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
     end
   end
 
+  defp required_capability(module, request) do
+    if module.task_policy() == :required and not tasks_declared?(request.client_capabilities) do
+      {:error, missing_tasks_capability(), :missing_capability}
+    else
+      :ok
+    end
+  end
+
   defp validate_and_run(conn, request, module, arguments, decision, runtime, base) do
     case Schema.validate(module.input_validator(runtime.cache, runtime.cache_options), arguments) do
       :ok ->
@@ -93,6 +104,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   defp run(conn, request, module, arguments, decision, runtime, base) do
     context = context(conn, request, decision, runtime)
 
+    case execution(module, arguments, context, request, runtime) do
+      :sync -> run_sync(conn, request, module, arguments, context, runtime, base)
+      :task -> run_task(conn, request, module, arguments, context, runtime, base)
+      {:error, %Error{} = error} -> protocol_error(conn, request, error, runtime, base)
+      {:error, reason} -> unexpected(conn, request, runtime, base, reason)
+    end
+  end
+
+  defp run_sync(conn, request, module, arguments, context, runtime, base) do
     case Runner.run(module, arguments, context, runtime.limits.request_timeout_ms) do
       {:ok, {:ok, %Response{} = response}} ->
         complete(conn, request, module, response, runtime, base)
@@ -109,6 +129,205 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       {:error, reason} ->
         unexpected(conn, request, runtime, base, reason)
     end
+  end
+
+  defp execution(module, arguments, context, request, runtime) do
+    declared? = tasks_declared?(request.client_capabilities)
+
+    case module.task_policy() do
+      :disabled ->
+        :sync
+
+      :required when not declared? ->
+        {:error, missing_tasks_capability()}
+
+      :required ->
+        :task
+
+      :optional when not declared? ->
+        :sync
+
+      :optional ->
+        select_optional(runtime, module, arguments, context)
+    end
+  end
+
+  defp select_optional(runtime, module, arguments, context) do
+    if Runtime.task_capable?(runtime) do
+      case runtime.task_selector.(module, arguments, context) do
+        :task -> :task
+        :sync -> :sync
+        _invalid -> {:error, :invalid_task_selector_return}
+      end
+    else
+      :sync
+    end
+  rescue
+    _exception -> {:error, :task_selector_exception}
+  catch
+    _kind, _reason -> {:error, :task_selector_exception}
+  end
+
+  defp run_task(conn, request, _module, _arguments, %Context{owner_key: nil}, runtime, base) do
+    unexpected(conn, request, runtime, base, :missing_owner_key)
+  end
+
+  defp run_task(conn, request, module, arguments, context, runtime, base) do
+    with {:ok, identifier} <- Identifier.generate(runtime.identifier, runtime.identifier_options),
+         {:ok, now} <- Clock.now(runtime.clock, runtime.clock_options),
+         task_context = %{context | task_id: identifier},
+         options = task_options(runtime, module, request, task_context, identifier, now),
+         {:ok, %Task{} = task} <- start_task(runtime, module, arguments, task_context, options),
+         :ok <- validate_created_task(task, task_context, request, options),
+         :ok <- verify_persisted_task(task, options, runtime),
+         result =
+           task
+           |> Task.create_result()
+           |> Wire.merge_meta(Result.metadata(runtime.server)),
+         :ok <- validate_task_result(:create_task_result, result, runtime),
+         {:ok, reply} <-
+           Wire.result(
+             conn,
+             200,
+             request.request_id,
+             result,
+             Map.put(base, :status, :accepted),
+             runtime
+           ) do
+      Events.emit(runtime, [:task, :creation], %{status: :ok}, elem(reply, 1))
+      reply
+    else
+      {:error, %Error{} = error} -> protocol_error(conn, request, error, runtime, base)
+      {:error, reason} -> unexpected(conn, request, runtime, base, reason)
+    end
+  end
+
+  defp start_task(runtime, module, arguments, context, options) do
+    case runtime.task_runner.start(module, arguments, context, options) do
+      {:ok, %Task{} = task} -> {:ok, task}
+      {:error, %Error{} = error} -> {:error, error}
+      _invalid -> {:error, :invalid_task_runner_return}
+    end
+  rescue
+    _exception -> {:error, :task_runner_exception}
+  catch
+    _kind, _reason -> {:error, :task_runner_exception}
+  end
+
+  defp task_options(runtime, module, request, context, identifier, now) do
+    validation_options = Runtime.task_validation_options(runtime, module)
+
+    generated = [
+      task_id: identifier,
+      owner_key: context.owner_key,
+      method: request.method,
+      request_id: request.request_id,
+      original_params: request.params,
+      client_capabilities: request.client_capabilities,
+      created_at: now,
+      ttl_ms: runtime.limits.default_task_ttl_ms,
+      poll_interval_ms: runtime.limits.default_poll_interval_ms,
+      clock: runtime.clock,
+      clock_options: runtime.clock_options,
+      task_store: runtime.task_store,
+      task_store_options: Runtime.effective_task_store_options(runtime, validation_options),
+      task_validation_options: validation_options
+    ]
+
+    Keyword.put(runtime.task_runner_options, :tama_mcp, generated)
+  end
+
+  defp validate_created_task(task, context, request, options) do
+    generated = Keyword.fetch!(options, :tama_mcp)
+
+    expected = %{
+      id: context.task_id,
+      owner_key: context.owner_key,
+      method: request.method,
+      request_id: request.request_id,
+      status: :working,
+      created_at: generated[:created_at],
+      last_updated_at: generated[:created_at],
+      ttl_ms: generated[:ttl_ms],
+      poll_interval_ms: generated[:poll_interval_ms],
+      original_params: request.params,
+      client_capabilities: request.client_capabilities
+    }
+
+    if TaskValidation.matches?(task, expected) do
+      Task.validate(task, generated[:task_validation_options])
+    else
+      {:error, :invalid_task}
+    end
+  end
+
+  defp verify_persisted_task(task, options, runtime) do
+    validation_options =
+      options |> Keyword.fetch!(:tama_mcp) |> Keyword.fetch!(:task_validation_options)
+
+    case runtime.task_store.get(
+           task.owner_key,
+           task.id,
+           Runtime.effective_task_store_options(runtime)
+         ) do
+      {:ok, %Task{} = persisted} ->
+        validate_persisted_task(task, persisted, validation_options)
+
+      _missing_or_mismatched ->
+        {:error, :task_not_durable}
+    end
+  rescue
+    _exception -> {:error, :task_store_exception}
+  catch
+    _kind, _reason -> {:error, :task_store_exception}
+  end
+
+  defp validate_persisted_task(initial, persisted, validation_options) do
+    with :ok <- Task.validate(persisted, validation_options),
+         true <- same_persisted_identity?(initial, persisted),
+         true <- persisted_progress?(initial, persisted) do
+      :ok
+    else
+      _invalid_or_mismatched -> {:error, :task_not_durable}
+    end
+  end
+
+  defp same_persisted_identity?(initial, persisted) do
+    TaskValidation.same_fields?(initial, persisted, [
+      :id,
+      :owner_key,
+      :method,
+      :request_id,
+      :created_at,
+      :ttl_ms,
+      :original_params,
+      :client_capabilities
+    ])
+  end
+
+  defp persisted_progress?(initial, persisted) when persisted.revision == initial.revision,
+    do: persisted == initial
+
+  defp persisted_progress?(initial, persisted) when persisted.revision > initial.revision,
+    do: DateTime.compare(persisted.last_updated_at, initial.last_updated_at) == :gt
+
+  defp persisted_progress?(_initial, _persisted), do: false
+
+  defp validate_task_result(kind, result, runtime) do
+    case Tasks.validate(kind, result, runtime.cache, runtime.cache_options) do
+      :ok -> :ok
+      {:error, _details} -> {:error, :invalid_protocol_result}
+    end
+  end
+
+  defp tasks_declared?(capabilities) do
+    get_in(capabilities, ["extensions", Protocol.tasks_extension()]) |> is_map()
+  end
+
+  defp missing_tasks_capability do
+    Error.missing_required_client_capability(%{
+      "extensions" => %{Protocol.tasks_extension() => %{}}
+    })
   end
 
   defp complete(conn, request, module, response, runtime, base) do

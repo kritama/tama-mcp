@@ -9,8 +9,11 @@ older protocol eras.
 The package is pre-release. Phase 1 provides the server and tool DSL, stateless
 Streamable HTTP transport, per-request authorization, discovery, deterministic
 tool listing, synchronous tool execution, schema validation, bounded telemetry,
-and reusable protocol conformance helpers. Durable tasks and subscriptions are
-the next implementation phases and are not advertised by the current runtime.
+and reusable protocol conformance helpers. Phase 2 is in progress: its package
+foundation now adds durable task contracts, server-directed task creation, and
+task polling and mutation methods. Full Phase 2 fixture coverage and Tama's
+application adapters remain follow-up work. Subscriptions and task notifications
+remain a later phase.
 
 ## Boundary
 
@@ -31,8 +34,9 @@ Codex / OpenCode / Pi
 ```
 
 - `TamaMCP` owns MCP JSON-RPC validation, the server/tool DSL, stateless HTTP,
-  protocol responses, cache keys and compiled validator artifacts, and the
-  future Tasks and subscription adapter contracts.
+  protocol responses, task values and transitions, durable task adapter
+  contracts, cache keys and compiled validator artifacts, and the future
+  subscription adapter contract.
 - `TamaOAuth` owns reusable OAuth and protected-resource protocol mechanics.
 - Tama owns identities, authorization policy, rate limits, the validator cache
   engine, Ecto persistence, durable execution, task transitions, and graph
@@ -45,20 +49,26 @@ for the complete contract and implementation acceptance criteria.
 
 ## Deliberate scope
 
-The implemented Phase 1 package supports:
+The implemented package supports:
 
 - MCP protocol version `2026-07-28` only;
 - server-side stateless Streamable HTTP;
-- `server/discover`, `tools/list`, and `tools/call`;
+- `server/discover`, `tools/list`, `tools/call`, `tasks/get`, `tasks/update`, and
+  `tasks/cancel`;
 - authorization-aware tool visibility and scope enforcement;
 - application-supplied authorization decisions and safe context values;
+- server-directed durable execution for task-required tools and explicit
+  application selection for task-optional tools;
+- owner-bound task lookup, input-response submission, and cooperative
+  cancellation through application adapters;
 - bounded request execution, successful results, errors, headers, and telemetry; and
-- reusable conformance validation against the vendored core schema.
+- reusable conformance validation against the vendored core and Tasks schemas.
 
 It does not provide an MCP client, STDIO transport, legacy initialization or
 session support, prompts, resources, sampling, elicitation, MCP Apps UI,
-database persistence, or a web server. Phase 1 also rejects task-required tools,
-the Tasks methods, and subscriptions until their durable adapters exist.
+database persistence, or a web server. Task support is advertised only when a
+complete durable store and runner are configured. Subscriptions remain
+unavailable until their clustered notification adapter exists.
 
 ## Server example
 
@@ -108,6 +118,30 @@ authenticated principal, owner key, claims, granted scopes, credential expiry,
 and explicit application assigns. Authentication runs once before transport
 validation on every HTTP request.
 
+## Durable tasks
+
+A tool declares `task: :required` or `task: :optional` in `use TamaMCP.Tool`.
+Task-capable transports configure both application-owned adapters:
+
+```elixir
+forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
+  server: Example.Server,
+  authorization: Example.Authorization,
+  cache: Example.Cache,
+  task_store: Example.TaskStore,
+  task_store_options: [repo: Example.Repo],
+  task_runner: Example.TaskRunner,
+  task_runner_options: [supervisor: Example.TaskSupervisor]
+```
+
+The runner's `c:TamaMCP.Task.Runner.start/4` callback is the atomic durability
+boundary: before returning a task handle it must persist a `TamaMCP.Task` and
+accept its execution handoff. `TamaMCP.Task.Store` owns owner-bound lookup,
+compare-and-update transitions, input responses, and cooperative cancellation.
+The default UTC clock and opaque UUID generator can be replaced for application
+or test needs. Optional tools remain synchronous unless `:task_selector`
+explicitly selects durable execution.
+
 The cache adapter implements `TamaMCP.Cache`. TamaMCP compiles tool validators
 while compiling each tool module, precompiles its fixed protocol validators,
 embeds their serialized artifacts, and owns versioned cache keys and
@@ -117,12 +151,13 @@ values are opaque Erlang terms and may contain functions.
 
 ## Conformance
 
-`TamaMCP.Conformance` validates complete Phase 1 requests and responses against
-the immutable upstream schema in `priv/protocol/2026-07-28`. Its bundled wire
-fixtures exercise discovery, authorization-aware listing, synchronous success,
-tool errors, malformed metadata, scope denial, standard and schema-declared
-header agreement, unsupported versions, explicit null output, output-schema
-failure, and rejection of protocol sessions.
+`TamaMCP.Conformance` validates complete core and Tasks requests and responses
+against the immutable upstream schemas in
+`priv/protocol/2026-07-28`. Its bundled wire fixtures exercise discovery,
+authorization-aware listing, synchronous and task creation results, task
+lookup/update/cancellation, tool errors, malformed metadata, scope denial,
+standard and schema-declared header agreement, unsupported versions, explicit
+null output, output-schema failure, and rejection of protocol sessions.
 
 Host applications can call `TamaMCP.Conformance.validate/3` for individual
 values or `TamaMCP.Conformance.run/3` with a request callback, their cache

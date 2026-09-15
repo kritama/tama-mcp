@@ -16,10 +16,17 @@ The project follows Semantic Versioning and uses Conventional Commits.
   `tools/call`.
 - Per-request authorization, scope-aware tool visibility, normalized request
   contexts, bounded errors, and telemetry.
-- Vendored Phase 1 wire fixtures and reusable `TamaMCP.Conformance` validators.
+- Vendored core wire fixtures and reusable `TamaMCP.Conformance` validators.
 - Explicit JSON `null` support for structured tool results.
 - An application-owned validator cache behaviour with versioned TamaMCP cache
   keys and compile-time serialized tool and protocol validator artifacts.
+- TamaMCP-owned durable task values, validated state transitions, replaceable
+  clocks and opaque identifier generators, and owner-bound task store and
+  atomic task runner behaviours.
+- Server-directed task execution plus `tasks/get`, `tasks/update`, and
+  `tasks/cancel`, gated by the per-request Tasks capability and complete runtime
+  adapter configuration.
+- Vendored Tasks schema validation and task-focused conformance fixtures.
 
 ### Security
 
@@ -39,6 +46,9 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Tie synchronous tool workers to their request lifetime and execution deadline.
 - Combine repeated list-valued `Accept` fields while retaining strict handling
   for single-valued transport headers.
+- Keep task existence indistinguishable across missing and unauthorized owners,
+  validate durable tasks again before exposing handles or polling results, and
+  contain invalid or raising task adapters behind bounded internal errors.
 - Reject unsafe `MCP-Protocol-Version` and `Mcp-Method` header characters before
   version negotiation or header/body comparison.
 - Validate OAuth scope-token syntax and reject oversized insufficient-scope

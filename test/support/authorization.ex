@@ -23,7 +23,8 @@ defmodule TamaMCP.TestSupport.Authorization do
              "test.null",
              "test.protocol_failing",
              "test.result",
-             "test.slow"
+             "test.slow",
+             "test.task_required"
            ],
            owner_key: "test-owner",
            expires_at: nil,
@@ -47,6 +48,26 @@ defmodule TamaMCP.TestSupport.Authorization do
            claims: %{},
            scopes: [],
            owner_key: "test-owner",
+           expires_at: nil
+         }}
+
+      "other" ->
+        {:ok,
+         %TamaMCP.Authorization.Decision{
+           principal: "other-principal",
+           claims: %{"sub" => "other-principal"},
+           scopes: ["test.task_required"],
+           owner_key: "other-owner",
+           expires_at: nil
+         }}
+
+      "ownerless" ->
+        {:ok,
+         %TamaMCP.Authorization.Decision{
+           principal: "ownerless-principal",
+           claims: %{"sub" => "ownerless-principal"},
+           scopes: ["test.task_required"],
+           owner_key: nil,
            expires_at: nil
          }}
 

@@ -2,9 +2,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   @moduledoc false
 
   alias TamaMCP.Authorization.Challenge
-  alias TamaMCP.Transport.StreamableHTTP.{Result, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Result, Runtime, Wire}
 
   @min_www_authenticate_bytes Challenge.minimum_size()
+  @maximum_protocol_integer 9_007_199_254_740_991
 
   def options!(opts, allowed) do
     unless Keyword.keyword?(opts) do
@@ -19,6 +20,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   def module!(opts, key) do
     case Keyword.fetch!(opts, key) do
       value when is_atom(value) and not is_nil(value) -> value
+      other -> raise ArgumentError, "#{key}: expected a compiled module, got: #{inspect(other)}"
+    end
+  end
+
+  def optional_module!(opts, key, default \\ nil) do
+    case Keyword.get(opts, key, default) do
+      nil -> nil
+      value when is_atom(value) -> value
       other -> raise ArgumentError, "#{key}: expected a compiled module, got: #{inspect(other)}"
     end
   end
@@ -44,6 +53,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
       raise ArgumentError,
             "cache: #{inspect(cache)} does not implement TamaMCP.Cache (missing fetch/3)"
     end
+  end
+
+  def task_selector!(nil), do: fn _module, _input, _context -> :sync end
+  def task_selector!(selector) when is_function(selector, 3), do: selector
+
+  def task_selector!({module, function}) when is_atom(module) and is_atom(function) do
+    if exports?(module, [{function, 3}]) do
+      &apply(module, function, [&1, &2, &3])
+    else
+      raise ArgumentError,
+            "task_selector: #{inspect(module)}.#{inspect(function)}/3 is not exported"
+    end
+  end
+
+  def task_selector!(other) do
+    raise ArgumentError,
+          "task_selector must be a 3-arity function or {module, function}, got: #{inspect(other)}"
   end
 
   def keyword!(value, label) do
@@ -110,15 +136,57 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     raise ArgumentError, "limits must be a keyword list or map of limit overrides"
   end
 
-  def catalog!(server, limits) do
+  def tasks!(%Runtime{} = runtime, selector_configured?) do
+    task_pair!(runtime.task_store, runtime.task_runner, selector_configured?)
+    clock!(runtime.clock)
+    identifier!(runtime.identifier)
+  end
+
+  defp task_pair!(nil, nil, false), do: :ok
+
+  defp task_pair!(nil, nil, true),
+    do: raise(ArgumentError, "task_selector requires task_store and task_runner")
+
+  defp task_pair!(nil, _runner, _selector),
+    do: raise(ArgumentError, "task_runner requires task_store")
+
+  defp task_pair!(_store, nil, _selector),
+    do: raise(ArgumentError, "task_store requires task_runner")
+
+  defp task_pair!(store, runner, _selector) do
+    unless exports?(store, create: 2, get: 3, transition: 6, update: 4, cancel: 3) do
+      raise ArgumentError,
+            "task_store: #{inspect(store)} does not implement TamaMCP.Task.Store"
+    end
+
+    unless exports?(runner, start: 4) do
+      raise ArgumentError,
+            "task_runner: #{inspect(runner)} does not implement TamaMCP.Task.Runner"
+    end
+  end
+
+  defp clock!(clock) do
+    unless exports?(clock, now: 1),
+      do: raise(ArgumentError, "clock: #{inspect(clock)} does not implement TamaMCP.Clock")
+  end
+
+  defp identifier!(identifier) do
+    unless exports?(identifier, generate: 1) do
+      raise ArgumentError,
+            "identifier: #{inspect(identifier)} does not implement TamaMCP.Identifier"
+    end
+  end
+
+  def catalog!(server, %Runtime{} = runtime) do
     tools = server.tools()
+    limits = runtime.limits
 
     required = for entry <- tools, entry.module.task_policy() == :required, do: entry.name
 
-    if required != [] do
+    if required != [] and not Runtime.task_capable?(runtime) do
       raise ArgumentError,
             "tools #{inspect(Enum.sort(required))} use task policy :required, which " <>
-              "requires task execution; Phase 1 servers cannot declare task-required tools"
+              "requires a configured task_store and task_runner"
     end
 
     if length(tools) > limits.max_tools_per_server do
@@ -132,7 +200,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
       challenge!(entry, limits.max_www_authenticate_bytes)
     end)
 
-    results!(server, limits.max_result_bytes)
+    results!(server, Runtime.task_capable?(runtime), limits.max_result_bytes)
   end
 
   defp challenge!(entry, maximum) do
@@ -153,9 +221,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     end
   end
 
-  defp results!(server, maximum) do
+  defp results!(server, task_capable?, maximum) do
     results = [
-      {"server/discover", Result.discover(server)},
+      {"server/discover", Result.discover(server, task_capable?)},
       {"tools/list", Result.tools(server)}
     ]
 
@@ -199,9 +267,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
   end
 
   defp merge_limits!(overrides, defaults) do
-    Map.new(defaults, fn {key, default} ->
-      {key, positive!(key, Map.get(overrides, key, default))}
-    end)
+    limits =
+      Map.new(defaults, fn {key, default} ->
+        {key, positive!(key, Map.get(overrides, key, default))}
+      end)
+
+    if limits.default_task_ttl_ms > limits.max_task_ttl_ms do
+      raise ArgumentError, "default_task_ttl_ms cannot exceed max_task_ttl_ms"
+    end
+
+    limits
   end
 
   defp positive!(:max_safe_metadata_bytes, value) when is_integer(value) and value >= 2, do: value
@@ -219,6 +294,18 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     raise ArgumentError,
           "limit :max_www_authenticate_bytes must be an integer of at least " <>
             "#{@min_www_authenticate_bytes}, got: #{inspect(value)}"
+  end
+
+  defp positive!(key, value)
+       when key in [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] and
+              is_integer(value) and value > 0 and value <= @maximum_protocol_integer,
+       do: value
+
+  defp positive!(key, value)
+       when key in [:default_task_ttl_ms, :max_task_ttl_ms, :default_poll_interval_ms] do
+    raise ArgumentError,
+          "limit #{inspect(key)} must be a positive protocol-safe integer no greater than " <>
+            "#{@maximum_protocol_integer}, got: #{inspect(value)}"
   end
 
   defp positive!(_key, value) when is_integer(value) and value > 0, do: value

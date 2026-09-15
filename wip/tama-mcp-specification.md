@@ -1,6 +1,7 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: Phase 1 implemented; Phases 2-5 pending
+Status: Phase 1 implemented; Phase 2 implementation in progress; Phases 3-5
+pending
 
 This document is the authoritative design contract for the first complete
 `tama_mcp` implementation. It defines the package boundary, supported protocol,
@@ -165,8 +166,8 @@ TamaMCP.Protocol
 TamaMCP.Response
 TamaMCP.Server
 TamaMCP.Task
-TamaMCP.TaskRunner
-TamaMCP.TaskStore
+TamaMCP.Task.Runner
+TamaMCP.Task.Store
 TamaMCP.Tool
 TamaMCP.Transport.StreamableHTTP.Plug
 ```
@@ -853,6 +854,9 @@ There is no protocol session in 2026. Task lookup must therefore never use
 task store must bind access to an application-defined owner key derived from the
 validated principal and resource.
 
+Task-producing tool calls must reject a missing owner key before invoking the
+task runner, generating durable work, or exposing a task handle.
+
 Unauthorized and nonexistent tasks should produce the same externally visible
 error wherever the specification permits, preventing task-existence probing.
 
@@ -881,7 +885,8 @@ The pinned extension permits a task result to be seeded in another state, but
 TamaMCP always creates tasks as `working` so persistence and execution have one
 deterministic entry point. A metadata update that retains `working` or
 `input_required` is permitted and is not a state transition. It must still use
-compare-and-update semantics and advance `lastUpdatedAt`.
+compare-and-update semantics and strictly advance `lastUpdatedAt`. Every other
+revision-advancing transition has the same strict timestamp requirement.
 
 An exact replay of an already-committed terminal state and payload is an
 idempotent no-op. A terminal payload mutation, a change from one terminal state
@@ -894,8 +899,18 @@ promise or perform a transition to `cancelled`; the runner may still commit
 non-terminal task to `failed` with a bounded expiration error after its TTL.
 
 The task store must preserve timestamps, TTL, suggested polling interval,
-status message, original request correlation, and the state-specific result,
-error, or input requests required by the protocol.
+status message, original request correlation, the originating request's client
+capabilities, and the state-specific result, error, or input requests required
+by the protocol. Before committing `input_required`, every input request must
+be supported by that capability snapshot, including the elicitation mode and
+sampling tool-use and deprecated context-inclusion sub-capabilities. It must
+also preserve every issued input-request key for the task's lifetime and reject
+reuse after a key is no longer outstanding. The retained history is capped by
+`max_input_request_keys_per_task`; a transition that would exceed the cap is
+rejected before persistence.
+
+Task TTL and polling values must remain within the Tasks schema's maximum safe
+integer `9_007_199_254_740_991`, even when a host raises runtime limits.
 
 A tool result with `isError: true` is still a completed tool call under the
 Tasks extension. JSON-RPC execution failure uses task status `failed`. The
@@ -907,7 +922,7 @@ state.
 
 ### 13.3 Task store behaviour
 
-`TamaMCP.TaskStore` defines the protocol-facing persistence contract. It must
+`TamaMCP.Task.Store` defines the protocol-facing persistence contract. It must
 support atomic creation, authorized lookup, compare-and-update transitions,
 and cooperative cancellation intent.
 
@@ -918,9 +933,25 @@ transaction boundaries.
 Task-store errors must be bounded package values. Raw changesets, database
 exceptions, or adapter-specific structs must never enter JSON responses.
 
+Transport calls include the effective task TTL, lifetime input-request key,
+status-message, result, and error-data bounds plus server result metadata in a
+reserved `:tama_mcp` adapter option. Stores must pass those validation options to
+`TamaMCP.Task.transition/4`; runners receive the same options for
+`TamaMCP.Task.new/2`. Task validation checks the complete encoded `tasks/get`
+result before a state commit. It also validates `input_required` payloads
+against the pinned `InputRequests` schema and the persisted client capabilities,
+and validates `completed` payloads against the pinned core `CallToolResult`
+schema using the configured validator cache. This keeps explicitly raised or
+lowered runtime limits and protocol payload contracts consistent at
+construction, persistence, lookup, transition, and wire recovery boundaries.
+Failed transitions validate the safely encoded error against the pinned Tasks
+`Error` schema before persistence. Per-task validation options retain the
+originating tool so a completed result's `structuredContent` is also checked
+against its declared output schema before commit.
+
 ### 13.4 Task runner behaviour
 
-`TamaMCP.TaskRunner` defines the application-owned handoff from a validated
+`TamaMCP.Task.Runner` defines the application-owned handoff from a validated
 task-producing tool call to durable execution:
 
 ~~~elixir
@@ -947,11 +978,21 @@ queue entry in one database transaction. TamaMCP does not depend on Ecto or a
 queue. Returning `{:error, error}` asserts that no task handle was exposed and
 no unreconciled externally visible task was left behind.
 
+The transport verifies owner-visible durability after the runner returns. The
+stored task may already be newer than the runner's initial `working` snapshot
+when a fast execution wins that race. Verification therefore requires a valid
+snapshot with matching immutable identity and request correlation plus
+monotonic revision and timestamp progress; it does not require mutable state to
+remain structurally equal to the returned snapshot.
+
 The runner later invokes the same tool `call/2` callback used for synchronous
 execution. A success or tool error is stored as a `completed` task containing
 the complete `CallToolResult`; a `TamaMCP.Error` or unexpected redacted
 exception is stored as `failed`. The runner updates task state through the
 task-store contract and publishes only after the state commit succeeds.
+The reserved runner options include the effective clock adapter and its options
+so every durable transition uses the same configured time source as task
+creation.
 
 ## 14. Notifications and subscriptions
 
@@ -1101,6 +1142,7 @@ The initial production defaults are:
 | `default_task_ttl_ms` | `86_400_000` | default task lifetime of 24 hours |
 | `max_task_ttl_ms` | `604_800_000` | maximum task lifetime of 7 days |
 | `default_poll_interval_ms` | `1_000` | task polling guidance |
+| `max_input_request_keys_per_task` | `256` | maximum distinct input-request keys issued over one task lifetime |
 | `max_task_ids_per_subscription` | `100` | maximum task IDs requested on one stream |
 | `notification_buffer_capacity` | `100` | maximum queued task snapshots per stream |
 | `stream_keepalive_interval_ms` | `15_000` | SSE keepalive comment interval |
@@ -1227,6 +1269,12 @@ contract without introducing a dependency from TamaMCP back to Tama.
 - `tasks/get`, `tasks/update`, and `tasks/cancel`; and
 - conversion of Tama persistence away from Anubis task structs and
   session-scoped identity.
+
+The Phase 2 feature branch implements the TamaMCP-owned task value, transitions,
+adapter behaviours, server-directed creation, Tasks methods, pinned-schema
+validators, and an initial conformance fixture set. The complete positive and
+negative fixture matrix and application-side persistence and runner adapters
+remain Phase 2 follow-up work.
 
 ### Phase 3: subscriptions and task notifications
 
