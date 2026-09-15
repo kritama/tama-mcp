@@ -155,7 +155,7 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
     maybe_transition(task, generated, options)
 
     case Keyword.get(options, :test) do
-      pid when is_pid(pid) -> send(pid, {:task_started, tool, input, context, task})
+      pid when is_pid(pid) -> send(pid, {:task_started, tool, input, context, task, generated})
       _none -> :ok
     end
 

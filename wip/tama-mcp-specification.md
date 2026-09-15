@@ -936,7 +936,8 @@ against the pinned `InputRequests` schema and `completed` payloads against the
 pinned core `CallToolResult` schema using the configured validator cache. This
 keeps explicitly raised or lowered runtime limits and protocol payload
 contracts consistent at construction, persistence, lookup, transition, and
-wire recovery boundaries.
+wire recovery boundaries. Failed transitions validate the safely encoded error
+against the pinned Tasks `Error` schema before persistence.
 
 ### 13.4 Task runner behaviour
 
@@ -979,6 +980,9 @@ execution. A success or tool error is stored as a `completed` task containing
 the complete `CallToolResult`; a `TamaMCP.Error` or unexpected redacted
 exception is stored as `failed`. The runner updates task state through the
 task-store contract and publishes only after the state commit succeeds.
+The reserved runner options include the effective clock adapter and its options
+so every durable transition uses the same configured time source as task
+creation.
 
 ## 14. Notifications and subscriptions
 

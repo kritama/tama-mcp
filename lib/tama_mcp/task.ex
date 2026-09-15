@@ -285,8 +285,15 @@ defmodule TamaMCP.Task do
         is_nil(task.error) and
         schema_valid?(ProtocolSchema, :call_tool_result, task.result, options)
 
-  defp payload?(%__MODULE__{status: :failed} = task, _options),
-    do: is_nil(task.input_requests) and is_nil(task.result) and match?(%Error{}, task.error)
+  defp payload?(%__MODULE__{status: :failed} = task, options),
+    do:
+      is_nil(task.input_requests) and is_nil(task.result) and match?(%Error{}, task.error) and
+        schema_valid?(
+          TasksSchema,
+          :error,
+          Error.encode(task.error, Keyword.get(options, :max_error_data_bytes, 8_192)),
+          options
+        )
 
   defp payload?(%__MODULE__{status: :cancelled} = task, _options),
     do: is_nil(task.input_requests) and is_nil(task.result) and is_nil(task.error)

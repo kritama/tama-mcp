@@ -8,8 +8,8 @@ defmodule TamaMCP.Task.Runner do
   handle was exposed and no unreconciled externally visible task remains.
 
   The `:tama_mcp` entry in `options` contains the generated task identity,
-  timestamps, effective store options, and `:task_validation_options` that must
-  be passed to `TamaMCP.Task.new/2` and every later task transition.
+  timestamps, effective clock and store options, and `:task_validation_options`
+  that must be passed to `TamaMCP.Task.new/2` and every later task transition.
   """
 
   @callback start(

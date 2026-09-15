@@ -223,6 +223,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       created_at: now,
       ttl_ms: runtime.limits.default_task_ttl_ms,
       poll_interval_ms: runtime.limits.default_poll_interval_ms,
+      clock: runtime.clock,
+      clock_options: runtime.clock_options,
       task_store: runtime.task_store,
       task_store_options: Runtime.effective_task_store_options(runtime),
       task_validation_options: Runtime.task_validation_options(runtime)

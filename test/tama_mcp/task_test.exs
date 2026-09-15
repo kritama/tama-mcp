@@ -215,6 +215,17 @@ defmodule TamaMCP.TaskTest do
                %{result: %{}, last_updated_at: @later},
                validation_options()
              )
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               task(),
+               :failed,
+               %{
+                 error: %Error{code: "invalid", message: "Execution failed"},
+                 last_updated_at: @later
+               },
+               validation_options()
+             )
   end
 
   defp task do

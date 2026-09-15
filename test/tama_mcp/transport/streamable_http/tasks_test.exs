@@ -37,6 +37,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   @missing_capability Protocol.error_code(:missing_required_client_capability)
   @invalid_params Protocol.error_code(:invalid_params)
   @internal Protocol.error_code(:internal)
+  @created ~U[2026-09-14 12:00:00Z]
   @later ~U[2026-09-14 12:00:01Z]
 
   setup do
@@ -99,7 +100,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     arguments = params["arguments"]
 
     assert_receive {:task_started, TamaMCP.TestSupport.Tools.TaskRequired, ^arguments, context,
-                    %Task{} = task}
+                    %Task{} = task, generated}
 
     assert context.task_id == task.id
     assert context.owner_key == "test-owner"
@@ -111,6 +112,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert "test.task_required" in context.scopes
     assert context.assigns == %{workspace: "test-workspace"}
     assert context.headers == %{}
+    assert generated[:clock] == TamaMCP.TestSupport.Tasks.Clock
+    assert generated[:clock_options] == [now: @created]
     assert {:ok, ^task} = Store.get("test-owner", task.id, agent: store)
 
     conn = post(runtime, Protocol.method(:tasks_get), %{"taskId" => task.id}, name: task.id)
@@ -179,7 +182,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert conn.status == 500
     assert get_in(decode(conn), ["error", "code"]) == @internal
-    refute_receive {:task_started, _, _, _, _}
+    refute_receive {:task_started, _, _, _, _, _}
     assert {:error, :not_found} = Store.get(nil, "task-phase2-1", agent: store)
   end
 
@@ -393,7 +396,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert conn.status == 200
     assert get_in(decode(conn), ["result", "status"]) == "working"
-    assert_receive {:task_started, _, _, _, %Task{} = initial}
+    assert_receive {:task_started, _, _, _, %Task{} = initial, _generated}
 
     assert {:ok, persisted} = Store.get(initial.owner_key, initial.id, agent: store)
     assert persisted.status == :completed
@@ -449,7 +452,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     invalid_transitions = [
       {:input_required, %{input_requests: %{"approval" => %{}}}},
-      {:completed, %{result: %{}}}
+      {:completed, %{result: %{}}},
+      {:failed, %{error: %Error{code: "invalid", message: "Execution failed"}}}
     ]
 
     for {status, attributes} <- invalid_transitions do
@@ -507,7 +511,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
       )
 
     assert conn.status == 200
-    assert_receive {:task_started, _, _, _, %Task{} = task}
+    assert_receive {:task_started, _, _, _, %Task{} = task, _generated}
     task
   end
 
@@ -523,6 +527,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
       task_runner: TamaMCP.TestSupport.Tasks.Runner,
       task_runner_options: [test: test],
       clock: TamaMCP.TestSupport.Tasks.Clock,
+      clock_options: [now: @created],
       identifier: TamaMCP.TestSupport.Tasks.Identifier
     ]
 

@@ -12,6 +12,7 @@ defmodule TamaMCP.Schema.Tasks do
     completed_task: "CompletedTask",
     create_task_result: "CreateTaskResult",
     detailed_task: "DetailedTask",
+    error: "Error",
     failed_task: "FailedTask",
     get_task_request: "GetTaskRequest",
     get_task_result: "GetTaskResult",
@@ -46,6 +47,7 @@ defmodule TamaMCP.Schema.Tasks do
           | :completed_task
           | :create_task_result
           | :detailed_task
+          | :error
           | :failed_task
           | :get_task_request
           | :get_task_result
