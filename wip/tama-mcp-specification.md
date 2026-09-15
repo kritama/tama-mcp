@@ -882,7 +882,8 @@ The pinned extension permits a task result to be seeded in another state, but
 TamaMCP always creates tasks as `working` so persistence and execution have one
 deterministic entry point. A metadata update that retains `working` or
 `input_required` is permitted and is not a state transition. It must still use
-compare-and-update semantics and advance `lastUpdatedAt`.
+compare-and-update semantics and strictly advance `lastUpdatedAt`. Every other
+revision-advancing transition has the same strict timestamp requirement.
 
 An exact replay of an already-committed terminal state and payload is an
 idempotent no-op. A terminal payload mutation, a change from one terminal state
@@ -919,6 +920,12 @@ transaction boundaries.
 Task-store errors must be bounded package values. Raw changesets, database
 exceptions, or adapter-specific structs must never enter JSON responses.
 
+Transport calls include the effective task TTL and status-message bounds in a
+reserved `:tama_mcp` adapter option. Stores must pass those validation options
+to `TamaMCP.Task.transition/4`; runners receive the same options for
+`TamaMCP.Task.new/2`. This keeps explicitly raised or lowered runtime limits
+consistent at construction, persistence, lookup, and transition boundaries.
+
 ### 13.4 Task runner behaviour
 
 `TamaMCP.TaskRunner` defines the application-owned handoff from a validated
@@ -947,6 +954,13 @@ Tama implementation may, for example, insert its task/submission row and its
 queue entry in one database transaction. TamaMCP does not depend on Ecto or a
 queue. Returning `{:error, error}` asserts that no task handle was exposed and
 no unreconciled externally visible task was left behind.
+
+The transport verifies owner-visible durability after the runner returns. The
+stored task may already be newer than the runner's initial `working` snapshot
+when a fast execution wins that race. Verification therefore requires a valid
+snapshot with matching immutable identity and request correlation plus
+monotonic revision and timestamp progress; it does not require mutable state to
+remain structurally equal to the returned snapshot.
 
 The runner later invokes the same tool `call/2` callback used for synchronous
 execution. A success or tool error is stored as a `completed` task containing

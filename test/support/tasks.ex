@@ -59,7 +59,7 @@ defmodule TamaMCP.TestSupport.Tasks.Store do
           {{:error, :conflict}, tasks}
 
         %Task{} = task ->
-          apply_transition(tasks, key, task, status, attributes)
+          apply_transition(tasks, key, task, status, attributes, options)
       end
     end)
   end
@@ -97,8 +97,10 @@ defmodule TamaMCP.TestSupport.Tasks.Store do
 
   defp agent(options), do: Keyword.fetch!(options, :agent)
 
-  defp apply_transition(tasks, key, task, status, attributes) do
-    case Task.transition(task, status, attributes) do
+  defp apply_transition(tasks, key, task, status, attributes, options) do
+    validation_options = get_in(options, [:tama_mcp, :task_validation_options]) || []
+
+    case Task.transition(task, status, attributes, validation_options) do
       {:ok, updated} -> {{:ok, updated}, Map.put(tasks, key, updated)}
       {:error, reason} -> {{:error, reason}, tasks}
     end
@@ -133,20 +135,24 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
     generated = Keyword.fetch!(options, :tama_mcp)
 
     {:ok, task} =
-      Task.new(%{
-        id: generated[:task_id],
-        owner_key: context.owner_key,
-        method: generated[:method],
-        request_id: generated[:request_id],
-        status_message: "Queued for durable execution.",
-        created_at: generated[:created_at],
-        last_updated_at: generated[:created_at],
-        ttl_ms: generated[:ttl_ms],
-        poll_interval_ms: generated[:poll_interval_ms],
-        original_params: generated[:original_params]
-      })
+      Task.new(
+        %{
+          id: generated[:task_id],
+          owner_key: context.owner_key,
+          method: generated[:method],
+          request_id: generated[:request_id],
+          status_message: "Queued for durable execution.",
+          created_at: generated[:created_at],
+          last_updated_at: generated[:created_at],
+          ttl_ms: generated[:ttl_ms],
+          poll_interval_ms: generated[:poll_interval_ms],
+          original_params: generated[:original_params]
+        },
+        generated[:task_validation_options]
+      )
 
     {:ok, task} = Store.create(task, generated[:task_store_options])
+    maybe_transition(task, generated, options)
 
     case Keyword.get(options, :test) do
       pid when is_pid(pid) -> send(pid, {:task_started, tool, input, context, task})
@@ -154,5 +160,25 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
     end
 
     {:ok, task}
+  end
+
+  defp maybe_transition(task, generated, options) do
+    case Keyword.get(options, :transition_after_create) do
+      {status, attributes} ->
+        {:ok, _persisted} =
+          Store.transition(
+            task.owner_key,
+            task.id,
+            task.revision,
+            status,
+            attributes,
+            generated[:task_store_options]
+          )
+
+        :ok
+
+      nil ->
+        :ok
+    end
   end
 end

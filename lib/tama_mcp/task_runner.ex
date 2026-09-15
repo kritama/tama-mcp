@@ -6,6 +6,10 @@ defmodule TamaMCP.TaskRunner do
   configured `TamaMCP.TaskStore`, its execution handoff has been accepted, and
   the returned task is in `working`. Returning an error asserts that no task
   handle was exposed and no unreconciled externally visible task remains.
+
+  The `:tama_mcp` entry in `options` contains the generated task identity,
+  timestamps, effective store options, and `:task_validation_options` that must
+  be passed to `TamaMCP.Task.new/2`.
   """
 
   @callback start(

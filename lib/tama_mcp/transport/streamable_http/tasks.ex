@@ -33,7 +33,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
   end
 
   defp get(conn, request, owner_key, runtime, base) do
-    case store(runtime, :get, [owner_key, request.params["taskId"], runtime.task_store_options]) do
+    case store(runtime, :get, [
+           owner_key,
+           request.params["taskId"],
+           Runtime.effective_task_store_options(runtime)
+         ]) do
       {:ok, %Task{} = task} ->
         with :ok <- validate_task(task, owner_key, request.params["taskId"], runtime),
              result =
@@ -74,7 +78,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
            owner_key,
            request.params["taskId"],
            responses,
-           runtime.task_store_options
+           Runtime.effective_task_store_options(runtime)
          ]) do
       :ok -> acknowledge(conn, request, :update_task_result, runtime, base, :update)
       {:error, :not_found} -> not_found(conn, request, runtime, base)
@@ -86,7 +90,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
   end
 
   defp cancel(conn, request, owner_key, runtime, base) do
-    case store(runtime, :cancel, [owner_key, request.params["taskId"], runtime.task_store_options]) do
+    case store(runtime, :cancel, [
+           owner_key,
+           request.params["taskId"],
+           Runtime.effective_task_store_options(runtime)
+         ]) do
       :ok -> acknowledge(conn, request, :cancel_task_result, runtime, base, :cancellation)
       {:error, :not_found} -> not_found(conn, request, runtime, base)
       {:error, :invalid_state} -> invalid_state(conn, request, runtime, base)

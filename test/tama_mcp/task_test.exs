@@ -114,6 +114,35 @@ defmodule TamaMCP.TaskTest do
     assert %Error{} = failed.error
   end
 
+  test "honors explicitly configured task bounds during creation and transitions" do
+    validation_options = [
+      max_task_ttl_ms: 777_600_000,
+      max_status_message_bytes: 4_096
+    ]
+
+    attributes =
+      attributes()
+      |> Map.put(:ttl_ms, 691_200_000)
+      |> Map.put(:status_message, String.duplicate("x", 3_000))
+
+    assert {:error, :invalid_task} = Task.new(attributes)
+    assert {:ok, task} = Task.new(attributes, validation_options)
+
+    assert {:ok, updated} =
+             Task.transition(
+               task,
+               :working,
+               %{
+                 last_updated_at: @later,
+                 status_message: String.duplicate("y", 3_000)
+               },
+               validation_options
+             )
+
+    assert updated.ttl_ms == 691_200_000
+    assert byte_size(updated.status_message) == 3_000
+  end
+
   test "rejects invalid timestamps, TTLs, messages, and state payloads" do
     assert {:error, :invalid_task} = Task.new(Map.put(attributes(), :ttl_ms, 0))
 
@@ -128,6 +157,9 @@ defmodule TamaMCP.TaskTest do
 
     assert {:error, :invalid_task} =
              Task.transition(task(), :working, last_updated_at: ~U[2026-09-14 11:59:59Z])
+
+    assert {:error, :invalid_task} =
+             Task.transition(task(), :working, last_updated_at: @created)
   end
 
   defp task do
@@ -157,11 +189,16 @@ defmodule TamaMCP.TaskTest do
   defp transition(task, status, overrides \\ [])
 
   defp transition(task, :working, overrides),
-    do: Task.transition(task, :working, Keyword.put(overrides, :last_updated_at, @later))
+    do:
+      Task.transition(
+        task,
+        :working,
+        Keyword.put(overrides, :last_updated_at, next_updated_at(task))
+      )
 
   defp transition(task, :input_required, overrides) do
     attributes =
-      [input_requests: %{}, last_updated_at: @later]
+      [input_requests: %{}, last_updated_at: next_updated_at(task)]
       |> Keyword.merge(overrides)
 
     Task.transition(task, :input_required, attributes)
@@ -170,20 +207,28 @@ defmodule TamaMCP.TaskTest do
   defp transition(task, :completed, overrides) do
     result = %{"resultType" => "complete", "content" => [], "isError" => false}
 
-    attributes = [result: result, last_updated_at: @later] |> Keyword.merge(overrides)
+    attributes =
+      [result: result, last_updated_at: next_updated_at(task)]
+      |> Keyword.merge(overrides)
+
     Task.transition(task, :completed, attributes)
   end
 
   defp transition(task, :failed, overrides) do
     attributes =
-      [error: Error.internal("Execution failed"), last_updated_at: @later]
+      [error: Error.internal("Execution failed"), last_updated_at: next_updated_at(task)]
       |> Keyword.merge(overrides)
 
     Task.transition(task, :failed, attributes)
   end
 
   defp transition(task, :cancelled, overrides),
-    do: Task.transition(task, :cancelled, Keyword.put(overrides, :last_updated_at, @later))
+    do:
+      Task.transition(
+        task,
+        :cancelled,
+        Keyword.put(overrides, :last_updated_at, next_updated_at(task))
+      )
 
   defp status_kind(:working), do: :working_task
   defp status_kind(:input_required), do: :input_required_task
@@ -201,4 +246,5 @@ defmodule TamaMCP.TaskTest do
   end
 
   defp later(seconds), do: DateTime.add(@created, seconds, :second)
+  defp next_updated_at(task), do: DateTime.add(task.last_updated_at, 1, :second)
 end

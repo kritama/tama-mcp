@@ -347,6 +347,58 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert {:error, :not_found} = Store.get("test-owner", "task-phase2-1", agent: store)
   end
 
+  test "durability verification accepts a task that advances before lookup", %{
+    runtime: runtime,
+    store: store
+  } do
+    completed_result = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => "finished immediately"}],
+      "isError" => false
+    }
+
+    runtime = %{
+      runtime
+      | task_runner_options: [
+          test: self(),
+          transition_after_create:
+            {:completed, %{last_updated_at: @later, result: completed_result}}
+        ]
+    }
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+        name: "task_required"
+      )
+
+    assert conn.status == 200
+    assert get_in(decode(conn), ["result", "status"]) == "working"
+    assert_receive {:task_started, _, _, _, %Task{} = initial}
+
+    assert {:ok, persisted} = Store.get(initial.owner_key, initial.id, agent: store)
+    assert persisted.status == :completed
+    assert persisted.revision == initial.revision + 1
+  end
+
+  test "task creation honors explicitly raised runtime bounds", %{store: store} do
+    runtime =
+      runtime(store, self(),
+        limits: [
+          default_task_ttl_ms: 691_200_000,
+          max_task_ttl_ms: 777_600_000,
+          max_status_message_bytes: 4_096
+        ]
+      )
+
+    task = create_task(runtime)
+
+    assert task.ttl_ms == 691_200_000
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, agent: store)
+  end
+
   test "optional task selection is explicit and defaults to synchronous", %{store: store} do
     synchronous = runtime(store, self(), server: __MODULE__.OptionalServer, selector: nil)
 
@@ -403,6 +455,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
       clock: TamaMCP.TestSupport.Tasks.Clock,
       identifier: TamaMCP.TestSupport.Tasks.Identifier
     ]
+
+    runtime_options =
+      case Keyword.fetch(options, :limits) do
+        {:ok, limits} -> Keyword.put(runtime_options, :limits, limits)
+        :error -> runtime_options
+      end
 
     runtime_options =
       case Keyword.get(options, :selector, :task) do

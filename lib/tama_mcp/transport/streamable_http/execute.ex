@@ -220,7 +220,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       ttl_ms: runtime.limits.default_task_ttl_ms,
       poll_interval_ms: runtime.limits.default_poll_interval_ms,
       task_store: runtime.task_store,
-      task_store_options: runtime.task_store_options
+      task_store_options: Runtime.effective_task_store_options(runtime),
+      task_validation_options: Runtime.task_validation_options(runtime)
     ]
 
     Keyword.put(runtime.task_runner_options, :tama_mcp, generated)
@@ -256,15 +257,47 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
   end
 
   defp verify_persisted_task(task, runtime) do
-    case runtime.task_store.get(task.owner_key, task.id, runtime.task_store_options) do
-      {:ok, ^task} -> :ok
-      _missing_or_mismatched -> {:error, :task_not_durable}
+    case runtime.task_store.get(
+           task.owner_key,
+           task.id,
+           Runtime.effective_task_store_options(runtime)
+         ) do
+      {:ok, %Task{} = persisted} ->
+        validate_persisted_task(task, persisted, runtime)
+
+      _missing_or_mismatched ->
+        {:error, :task_not_durable}
     end
   rescue
     _exception -> {:error, :task_store_exception}
   catch
     _kind, _reason -> {:error, :task_store_exception}
   end
+
+  defp validate_persisted_task(initial, persisted, runtime) do
+    with :ok <- Task.validate(persisted, Runtime.task_validation_options(runtime)),
+         true <- same_persisted_identity?(initial, persisted),
+         true <- persisted_progress?(initial, persisted) do
+      :ok
+    else
+      _invalid_or_mismatched -> {:error, :task_not_durable}
+    end
+  end
+
+  defp same_persisted_identity?(initial, persisted) do
+    persisted.id == initial.id and persisted.owner_key == initial.owner_key and
+      persisted.method == initial.method and persisted.request_id == initial.request_id and
+      persisted.created_at == initial.created_at and persisted.ttl_ms == initial.ttl_ms and
+      persisted.original_params == initial.original_params
+  end
+
+  defp persisted_progress?(initial, persisted) when persisted.revision == initial.revision,
+    do: persisted == initial
+
+  defp persisted_progress?(initial, persisted) when persisted.revision > initial.revision,
+    do: DateTime.compare(persisted.last_updated_at, initial.last_updated_at) == :gt
+
+  defp persisted_progress?(_initial, _persisted), do: false
 
   defp validate_task_result(kind, result, runtime) do
     case Tasks.validate(kind, result, runtime.cache, runtime.cache_options) do

@@ -136,5 +136,21 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     do: not is_nil(store) and not is_nil(runner)
 
   @doc false
+  @spec task_validation_options(t()) :: keyword()
+  def task_validation_options(%__MODULE__{limits: limits}) do
+    [
+      max_status_message_bytes: limits.max_status_message_bytes,
+      max_task_ttl_ms: limits.max_task_ttl_ms
+    ]
+  end
+
+  @doc false
+  @spec effective_task_store_options(t()) :: keyword()
+  def effective_task_store_options(%__MODULE__{} = runtime) do
+    namespace = [task_validation_options: task_validation_options(runtime)]
+    Keyword.put(runtime.task_store_options, :tama_mcp, namespace)
+  end
+
+  @doc false
   def default_limits, do: @default_limits
 end

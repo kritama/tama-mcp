@@ -67,9 +67,15 @@ defmodule TamaMCP.Task do
           revision: non_neg_integer()
         }
 
-  @doc "Creates the deterministic initial `working` task value."
-  @spec new(map() | keyword()) :: {:ok, t()} | {:error, :invalid_task}
-  def new(attributes) do
+  @doc """
+  Creates the deterministic initial `working` task value.
+
+  The validation options are the same bounds accepted by `validate/2`.
+  Applications using non-default runtime limits must pass those effective
+  options when constructing the task.
+  """
+  @spec new(map() | keyword(), keyword()) :: {:ok, t()} | {:error, :invalid_task}
+  def new(attributes, options \\ []) do
     attributes = Map.new(attributes)
 
     task =
@@ -85,7 +91,7 @@ defmodule TamaMCP.Task do
         })
       )
 
-    case validate(task) do
+    case validate(task, options) do
       :ok -> {:ok, task}
       {:error, :invalid_task} -> {:error, :invalid_task}
     end
@@ -104,10 +110,15 @@ defmodule TamaMCP.Task do
       else: {:error, :invalid_task}
   end
 
-  @doc "Applies one explicit, revision-advancing task transition."
-  @spec transition(t(), status(), map() | keyword()) ::
+  @doc """
+  Applies one explicit, revision-advancing task transition.
+
+  Every committed transition must strictly advance `last_updated_at`. The
+  validation options must match those used when constructing the task.
+  """
+  @spec transition(t(), status(), map() | keyword(), keyword()) ::
           {:ok, t()} | {:error, :invalid_state | :invalid_task}
-  def transition(%__MODULE__{} = task, next_status, attributes \\ %{}) do
+  def transition(%__MODULE__{} = task, next_status, attributes \\ %{}, options \\ []) do
     attributes = Map.new(attributes)
 
     cond do
@@ -118,10 +129,10 @@ defmodule TamaMCP.Task do
         terminal_replay(task, next_status, attributes)
 
       next_status == task.status and next_status in [:working, :input_required] ->
-        update(task, next_status, attributes)
+        update(task, next_status, attributes, options)
 
       next_status in Map.fetch!(@transitions, task.status) ->
-        update(task, next_status, attributes)
+        update(task, next_status, attributes, options)
 
       true ->
         {:error, :invalid_state}
@@ -147,9 +158,9 @@ defmodule TamaMCP.Task do
     payload(result, task, max_error_data_bytes)
   end
 
-  defp update(task, status, attributes) do
+  defp update(task, status, attributes, options) do
     with %DateTime{} = updated_at <- attributes[:last_updated_at],
-         true <- DateTime.compare(updated_at, task.last_updated_at) != :lt do
+         :gt <- DateTime.compare(updated_at, task.last_updated_at) do
       candidate =
         task
         |> Map.merge(%{
@@ -163,7 +174,7 @@ defmodule TamaMCP.Task do
         })
         |> state_payload(status, attributes)
 
-      case validate(candidate) do
+      case validate(candidate, options) do
         :ok -> {:ok, candidate}
         {:error, :invalid_task} -> {:error, :invalid_task}
       end
