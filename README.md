@@ -9,11 +9,11 @@ older protocol eras.
 The package is pre-release. Phase 1 provides the server and tool DSL, stateless
 Streamable HTTP transport, per-request authorization, discovery, deterministic
 tool listing, synchronous tool execution, schema validation, bounded telemetry,
-and reusable protocol conformance helpers. Phase 2 is in progress: its package
-foundation now adds durable task contracts, server-directed task creation, and
-task polling and mutation methods. Full Phase 2 fixture coverage and Tama's
-application adapters remain follow-up work. Subscriptions and task notifications
-remain a later phase.
+and reusable protocol conformance helpers. Phase 2 adds durable task contracts,
+server-directed task creation, task polling and mutation methods, and the full
+package conformance matrix. Tama's application-owned persistence and runner
+adapters remain a separate integration phase. Subscriptions and task
+notifications remain a later phase.
 
 ## Boundary
 
@@ -137,10 +137,13 @@ forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
 The runner's `c:TamaMCP.Task.Runner.start/4` callback is the atomic durability
 boundary: before returning a task handle it must persist a `TamaMCP.Task` and
 accept its execution handoff. `TamaMCP.Task.Store` owns owner-bound lookup,
-compare-and-update transitions, input responses, and cooperative cancellation.
-The default UTC clock and opaque UUID generator can be replaced for application
-or test needs. Optional tools remain synchronous unless `:task_selector`
-explicitly selects durable execution.
+compare-and-update transitions, atomic one-time acceptance of outstanding input
+responses, and durable idempotent cooperative-cancellation intent. Store
+notifications and worker signals occur only after their corresponding state
+commit; no-op input and cancellation replays do not signal workers. The default
+UTC clock and opaque UUID generator can be replaced for application or test
+needs. Optional tools remain synchronous unless `:task_selector` explicitly
+selects durable execution; task-disabled tools do not consult the selector.
 
 The cache adapter implements `TamaMCP.Cache`. TamaMCP compiles tool validators
 while compiling each tool module, precompiles its fixed protocol validators,
@@ -157,11 +160,19 @@ against the immutable upstream schemas in
 authorization-aware listing, synchronous and task creation results, task
 lookup/update/cancellation, tool errors, malformed metadata, scope denial,
 standard and schema-declared header agreement, unsupported versions, explicit
-null output, output-schema failure, and rejection of protocol sessions.
+null output, output-schema failure, and rejection of protocol sessions. The
+task set contains 23 HTTP fixtures and 11 static task-profile fixtures covering
+all five states, invalid cross-state payloads, recovery, capability and owner
+denials, cancellation races, and unsupported task methods. Successful task
+responses validate the complete JSON-RPC envelope independently from the nested
+Tasks result.
 
 Host applications can call `TamaMCP.Conformance.validate/3` for individual
-values or `TamaMCP.Conformance.run/3` with a request callback, their cache
-adapter, and an application fixture set.
+values, `TamaMCP.Conformance.validate_schema_fixtures/3` for the static task
+profile, or `TamaMCP.Conformance.run/3` with a request callback, their cache
+adapter, and an application fixture set. Task HTTP fixtures may include bounded
+setup metadata that an application contract adapter uses to prepare the
+required durable state before issuing the wire request.
 
 ## Dependencies
 

@@ -12,10 +12,16 @@ defmodule TamaMCP.Conformance do
   extension.
 
   `run/2` passes each fixture's `%{"headers" => [[name, value]], "body" => map}`
-  request to the supplied callback. The callback returns
+  request to the supplied callback. Task fixtures may also include a bounded
+  `setup` description alongside those wire fields so a host contract adapter
+  can arrange the required durable state. The callback returns
   `%{status: integer, headers: [{name, value}], body: map}`. Applications may
   run the bundled reference fixtures or supply fixtures with their own
   authorization header and synchronous tool contract.
+
+  `validate_schema_fixtures/3` checks the static positive and negative task
+  values bundled beside the HTTP fixtures. These assertions cover invalid
+  cross-state payloads that a conforming server must never emit.
   """
 
   alias TamaMCP.Schema.{Protocol, Tasks}
@@ -31,7 +37,9 @@ defmodule TamaMCP.Conformance do
   @external_resource @core_fixture_path
   @external_resource @tasks_fixture_path
   @core_fixtures @core_fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
-  @tasks_fixtures @tasks_fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
+  @tasks_document @tasks_fixture_path |> File.read!() |> Jason.decode!()
+  @tasks_fixtures Map.fetch!(@tasks_document, "fixtures")
+  @task_schema_fixtures Map.get(@tasks_document, "schemaFixtures", [])
 
   @kinds %{
     "call_tool_request" => :call_tool_request,
@@ -44,6 +52,8 @@ defmodule TamaMCP.Conformance do
     "list_tools_request" => :list_tools_request,
     "list_tools_result" => :list_tools_result,
     "list_tools_response" => :list_tools_response,
+    "result_response" => :result_response,
+    "task_profile" => :task_profile,
     "cancel_task_request" => :cancel_task_request,
     "cancel_task_result" => :cancel_task_result,
     "cancelled_task" => :cancelled_task,
@@ -70,6 +80,8 @@ defmodule TamaMCP.Conformance do
           | :list_tools_request
           | :list_tools_result
           | :list_tools_response
+          | :result_response
+          | :task_profile
           | :cancel_task_request
           | :cancel_task_result
           | :cancelled_task
@@ -86,7 +98,16 @@ defmodule TamaMCP.Conformance do
 
   @doc "Validates a protocol value against the vendored MCP schema."
   @spec validate(kind(), term(), module(), keyword()) :: :ok | {:error, [String.t()]}
-  def validate(kind, value, cache, cache_options \\ []) do
+  def validate(kind, value, cache, cache_options \\ [])
+
+  def validate(:task_profile, value, cache, cache_options) do
+    with :ok <- Tasks.validate(:get_task_result, value, cache, cache_options),
+         :ok <- validate_task_payload_keys(value) do
+      validate_task_payload(value, cache, cache_options)
+    end
+  end
+
+  def validate(kind, value, cache, cache_options) do
     if kind in task_kinds(),
       do: Tasks.validate(kind, value, cache, cache_options),
       else: Protocol.validate(kind, value, cache, cache_options)
@@ -113,9 +134,38 @@ defmodule TamaMCP.Conformance do
   @spec tasks_fixtures() :: [map()]
   def tasks_fixtures, do: @tasks_fixtures
 
+  @doc "Returns static positive and negative Tasks schema fixtures bundled with TamaMCP."
+  @spec task_schema_fixtures() :: [map()]
+  def task_schema_fixtures, do: @task_schema_fixtures
+
   @doc "Returns the complete immutable core and Tasks fixture set."
   @spec all_fixtures() :: [map()]
   def all_fixtures, do: @core_fixtures ++ @tasks_fixtures
+
+  @doc "Validates static Tasks values against their expected vendored schema outcomes."
+  @spec validate_schema_fixtures(module(), [map()], keyword()) ::
+          :ok | {:error, [String.t()]}
+  def validate_schema_fixtures(
+        cache,
+        fixtures \\ @task_schema_fixtures,
+        cache_options \\ []
+      )
+      when is_atom(cache) and is_list(fixtures) and is_list(cache_options) do
+    errors =
+      Enum.flat_map(fixtures, fn fixture ->
+        []
+        |> verify_schema(
+          fixture["schema"],
+          fixture["valid"],
+          fixture["value"],
+          cache,
+          cache_options
+        )
+        |> Enum.map(&"#{fixture["name"]}: #{&1}")
+      end)
+
+    if errors == [], do: :ok, else: {:error, errors}
+  end
 
   @doc "Runs every supplied fixture through an application request callback."
   @spec run((map() -> map()), module(), [map()], keyword()) :: :ok | {:error, [String.t()]}
@@ -154,9 +204,16 @@ defmodule TamaMCP.Conformance do
       cache,
       cache_options
     )
+    |> verify_optional_schema(
+      fixture["responseEnvelopeSchema"],
+      Map.get(fixture, "responseEnvelopeValid", true),
+      response[:body],
+      cache,
+      cache_options
+    )
     |> verify_schema(
       fixture["responseSchema"],
-      true,
+      Map.get(fixture, "responseValid", true),
       at_path(response[:body], fixture["responsePath"]),
       cache,
       cache_options
@@ -189,6 +246,12 @@ defmodule TamaMCP.Conformance do
     end
   end
 
+  defp verify_optional_schema(errors, nil, _valid?, _value, _cache, _cache_options),
+    do: errors
+
+  defp verify_optional_schema(errors, name, valid?, value, cache, cache_options),
+    do: verify_schema(errors, name, valid?, value, cache, cache_options)
+
   defp task_kinds do
     [
       :cancel_task_request,
@@ -206,6 +269,43 @@ defmodule TamaMCP.Conformance do
       :working_task
     ]
   end
+
+  defp validate_task_payload_keys(%{"status" => status} = value) do
+    expected =
+      case status do
+        "working" -> []
+        "input_required" -> ["inputRequests"]
+        "completed" -> ["result"]
+        "failed" -> ["error"]
+        "cancelled" -> []
+        _unsupported -> :invalid
+      end
+
+    present = Enum.filter(["inputRequests", "result", "error"], &Map.has_key?(value, &1))
+
+    if present == expected do
+      :ok
+    else
+      {:error, ["#{status} task has invalid state-specific payload fields"]}
+    end
+  end
+
+  defp validate_task_payload_keys(_value), do: {:error, ["task status is missing"]}
+
+  defp validate_task_payload(
+         %{"status" => "input_required", "inputRequests" => requests},
+         cache,
+         options
+       ),
+       do: Tasks.validate(:input_requests, requests, cache, options)
+
+  defp validate_task_payload(%{"status" => "completed", "result" => result}, cache, options),
+    do: Protocol.validate(:call_tool_result, result, cache, options)
+
+  defp validate_task_payload(%{"status" => "failed", "error" => error}, cache, options),
+    do: Tasks.validate(:error, error, cache, options)
+
+  defp validate_task_payload(_value, _cache, _options), do: :ok
 
   defp at_path(value, nil), do: value
   defp at_path(value, path) when is_list(path), do: get_in(value, path)
