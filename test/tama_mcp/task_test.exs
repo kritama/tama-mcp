@@ -367,6 +367,19 @@ defmodule TamaMCP.TaskTest do
                },
                validation_options()
              )
+
+    assert {:error, :invalid_task} =
+             Task.transition(
+               sampling_without_tools,
+               :input_required,
+               %{
+                 input_requests: %{
+                   "sampling" => sampling_request(%{"includeContext" => "allServers"})
+                 },
+                 last_updated_at: @later
+               },
+               validation_options()
+             )
   end
 
   test "accepts every input request declared by the originating client" do
@@ -374,14 +387,18 @@ defmodule TamaMCP.TaskTest do
       tasks_capability()
       |> Map.put("elicitation", %{"url" => %{}})
       |> Map.put("roots", %{})
-      |> Map.put("sampling", %{"tools" => %{}})
+      |> Map.put("sampling", %{"context" => %{}, "tools" => %{}})
 
     capable = %{task() | client_capabilities: capabilities}
 
     requests = %{
       "url" => url_elicitation_request(),
       "roots" => roots_request(),
-      "sampling" => sampling_request(%{"tools" => [sampling_tool()]})
+      "sampling" =>
+        sampling_request(%{
+          "includeContext" => "thisServer",
+          "tools" => [sampling_tool()]
+        })
     }
 
     assert {:ok, %Task{status: :input_required, input_requests: ^requests}} =
@@ -389,6 +406,24 @@ defmodule TamaMCP.TaskTest do
                capable,
                :input_required,
                %{input_requests: requests, last_updated_at: @later},
+               validation_options()
+             )
+
+    basic_sampling = %{
+      task()
+      | client_capabilities: Map.put(tasks_capability(), "sampling", %{})
+    }
+
+    assert {:ok, %Task{status: :input_required}} =
+             Task.transition(
+               basic_sampling,
+               :input_required,
+               %{
+                 input_requests: %{
+                   "sampling" => sampling_request(%{"includeContext" => "none"})
+                 },
+                 last_updated_at: @later
+               },
                validation_options()
              )
 

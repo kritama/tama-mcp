@@ -295,7 +295,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   test "store rejects input requests unsupported by the originating client", %{
     runtime: runtime
   } do
-    tasks_only = %{"extensions" => %{Protocol.tasks_extension() => %{}}}
+    tasks_and_basic_sampling = %{
+      "extensions" => %{Protocol.tasks_extension() => %{}},
+      "sampling" => %{}
+    }
 
     conn =
       post(
@@ -303,12 +306,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
         Protocol.method(:tools_call),
         %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
         name: "task_required",
-        client_capabilities: tasks_only
+        client_capabilities: tasks_and_basic_sampling
       )
 
     assert conn.status == 200
     assert_receive {:task_started, _, _, _, %Task{} = task, generated}
-    assert task.client_capabilities == tasks_only
+    assert task.client_capabilities == tasks_and_basic_sampling
 
     assert {:error, :invalid_task} =
              Store.transition(
@@ -318,6 +321,23 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
                :input_required,
                %{
                  input_requests: %{"approval" => elicitation_request()},
+                 last_updated_at: @later
+               },
+               generated[:task_store_options]
+             )
+
+    assert {:ok, ^task} = Store.get(task.owner_key, task.id, generated[:task_store_options])
+
+    assert {:error, :invalid_task} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :input_required,
+               %{
+                 input_requests: %{
+                   "sampling" => sampling_request(%{"includeContext" => "thisServer"})
+                 },
                  last_updated_at: @later
                },
                generated[:task_store_options]
@@ -719,6 +739,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
           "required" => ["approved"]
         }
       }
+    }
+  end
+
+  defp sampling_request(extra_params) do
+    %{
+      "method" => "sampling/createMessage",
+      "params" =>
+        Map.merge(
+          %{
+            "messages" => [
+              %{"role" => "user", "content" => %{"type" => "text", "text" => "Hello"}}
+            ],
+            "maxTokens" => 100
+          },
+          extra_params
+        )
     }
   end
 

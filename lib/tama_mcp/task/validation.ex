@@ -245,7 +245,8 @@ defmodule TamaMCP.Task.Validation do
        when is_map(params) do
     case Map.get(capabilities, "sampling") do
       %{} = sampling ->
-        not sampling_tool_use?(params) or is_map(Map.get(sampling, "tools"))
+        sampling_tools_supported?(params, sampling) and
+          sampling_context_supported?(params, sampling)
 
       _unsupported ->
         false
@@ -259,6 +260,14 @@ defmodule TamaMCP.Task.Validation do
 
   defp sampling_tool_use?(params),
     do: Map.has_key?(params, "tools") or Map.has_key?(params, "toolChoice")
+
+  defp sampling_tools_supported?(params, sampling),
+    do: not sampling_tool_use?(params) or is_map(Map.get(sampling, "tools"))
+
+  defp sampling_context_supported?(params, sampling) do
+    Map.get(params, "includeContext", "none") == "none" or
+      is_map(Map.get(sampling, "context"))
+  end
 
   defp value(%__MODULE__{} = validation, {:encoded_error, field}) do
     validation.task

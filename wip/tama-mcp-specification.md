@@ -903,9 +903,9 @@ status message, original request correlation, the originating request's client
 capabilities, and the state-specific result, error, or input requests required
 by the protocol. Before committing `input_required`, every input request must
 be supported by that capability snapshot, including the elicitation mode and
-sampling tool-use sub-capability. It must also preserve every issued
-input-request key for the task's lifetime and reject reuse after a key is no
-longer outstanding. The retained history is capped by
+sampling tool-use and deprecated context-inclusion sub-capabilities. It must
+also preserve every issued input-request key for the task's lifetime and reject
+reuse after a key is no longer outstanding. The retained history is capped by
 `max_input_request_keys_per_task`; a transition that would exceed the cap is
 rejected before persistence.
 
