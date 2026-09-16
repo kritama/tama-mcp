@@ -129,9 +129,25 @@ defmodule TamaMCP.Conformance do
   def validate(kind, value, cache, cache_options \\ [])
 
   def validate(:task_profile, value, cache, cache_options) do
-    with :ok <- Tasks.validate(:get_task_result, value, cache, cache_options),
-         :ok <- validate_task_payload_keys(value) do
-      validate_task_payload(value, cache, cache_options)
+    with :ok <- Tasks.validate(:get_task_result, value, cache, cache_options) do
+      validate_task_state(value, cache, cache_options)
+    end
+  end
+
+  def validate(:task_status_notification_params, value, cache, cache_options) do
+    with :ok <- Tasks.validate(:task_status_notification_params, value, cache, cache_options) do
+      validate_task_state(value, cache, cache_options)
+    end
+  end
+
+  def validate(
+        :task_status_notification,
+        %{"params" => params} = value,
+        cache,
+        cache_options
+      ) do
+    with :ok <- Tasks.validate(:task_status_notification, value, cache, cache_options) do
+      validate_task_state(params, cache, cache_options)
     end
   end
 
@@ -394,6 +410,12 @@ defmodule TamaMCP.Conformance do
   end
 
   defp validate_task_payload_keys(_value), do: {:error, ["task status is missing"]}
+
+  defp validate_task_state(value, cache, options) do
+    with :ok <- validate_task_payload_keys(value) do
+      validate_task_payload(value, cache, options)
+    end
+  end
 
   defp validate_task_payload(
          %{"status" => "input_required", "inputRequests" => requests},

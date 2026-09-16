@@ -232,6 +232,39 @@ defmodule TamaMCP.ConformanceTest do
                       _fingerprint}
   end
 
+  test "task notification validators reject cross-state payloads" do
+    working = task_notification_fixture("working")
+    completed = task_notification_fixture("completed")
+    working_params = working["params"]
+
+    assert :ok =
+             Conformance.validate(
+               :task_status_notification_params,
+               working_params,
+               TamaMCP.TestSupport.Cache
+             )
+
+    assert :ok =
+             Conformance.validate(
+               :task_status_notification,
+               working,
+               TamaMCP.TestSupport.Cache
+             )
+
+    invalid_params = Map.put(working_params, "result", completed["params"]["result"])
+    invalid_notification = put_in(working, ["params"], invalid_params)
+
+    for {kind, value} <- [
+          task_status_notification_params: invalid_params,
+          task_status_notification: invalid_notification
+        ] do
+      assert {:error, details} =
+               Conformance.validate(kind, value, TamaMCP.TestSupport.Cache)
+
+      assert "working task has invalid state-specific payload fields" in details
+    end
+  end
+
   test "fixture verification reports response drift without raising" do
     fixture = hd(Conformance.fixtures())
 
@@ -401,6 +434,12 @@ defmodule TamaMCP.ConformanceTest do
   defp status("completed"), do: :completed
   defp status("failed"), do: :failed
   defp status("cancelled"), do: :cancelled
+
+  defp task_notification_fixture(status) do
+    Conformance.subscription_fixtures()
+    |> Enum.flat_map(&(get_in(&1, ["expected", "events"]) || []))
+    |> Enum.find(&(get_in(&1, ["params", "status"]) == status))
+  end
 
   defp task_capabilities do
     %{
