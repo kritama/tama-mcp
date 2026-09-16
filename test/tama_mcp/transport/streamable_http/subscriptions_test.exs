@@ -40,13 +40,26 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.Authorization do
   @impl true
   def register_invalidation(_decision, subscriber, options) do
     state = Agent.get(Keyword.fetch!(options, :agent), & &1)
+    test = Keyword.fetch!(options, :test)
 
-    if Map.get(state, :registration) == :error do
-      {:error, TamaMCP.Error.internal()}
-    else
-      reference = make_ref()
-      send(Keyword.fetch!(options, :test), {:invalidation_registered, subscriber, reference})
-      {:ok, reference}
+    case Map.get(state, :registration, :ok) do
+      :error ->
+        {:error, TamaMCP.Error.internal()}
+
+      :block ->
+        reference = make_ref()
+        send(test, {:invalidation_registration_blocked, subscriber, reference})
+
+        receive do
+          {:continue_invalidation_registration, ^reference} -> {:ok, reference}
+        after
+          1_000 -> {:error, TamaMCP.Error.internal()}
+        end
+
+      :ok ->
+        reference = make_ref()
+        send(test, {:invalidation_registered, subscriber, reference})
+        {:ok, reference}
     end
   end
 
@@ -55,6 +68,86 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.Authorization do
     send(Keyword.fetch!(options, :test), {:invalidation_unregistered, reference})
     :ok
   end
+end
+
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.BlockingStore do
+  @moduledoc false
+
+  @behaviour TamaMCP.Task.Store
+
+  alias TamaMCP.TestSupport.Tasks.Store
+
+  @impl true
+  def create(task, options), do: Store.create(task, options)
+
+  @impl true
+  def get(owner_key, task_id, options) do
+    gate = Keyword.fetch!(options, :gate)
+
+    if Agent.get(gate, & &1) == :block do
+      reference = make_ref()
+      send(Keyword.fetch!(options, :test), {:task_get_blocked, self(), reference})
+
+      receive do
+        {:continue_task_get, ^reference} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+
+    Store.get(owner_key, task_id, options)
+  end
+
+  @impl true
+  def transition(owner_key, task_id, revision, status, attributes, options),
+    do: Store.transition(owner_key, task_id, revision, status, attributes, options)
+
+  @impl true
+  def update(owner_key, task_id, input_responses, options),
+    do: Store.update(owner_key, task_id, input_responses, options)
+
+  @impl true
+  def cancel(owner_key, task_id, options), do: Store.cancel(owner_key, task_id, options)
+end
+
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.FirstChunkClosedAdapter do
+  @moduledoc false
+
+  alias Plug.Adapters.Test.Conn
+
+  def read_req_body(payload, options), do: Conn.read_req_body(payload, options)
+
+  def send_resp(payload, status, headers, body),
+    do: Conn.send_resp(payload, status, headers, body)
+
+  def send_chunked(payload, status, headers),
+    do: Conn.send_chunked(payload, status, headers)
+
+  def chunk(_payload, _body), do: {:error, :closed}
+end
+
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.QueuedOverflowNotification do
+  @moduledoc false
+
+  @behaviour TamaMCP.Notification
+
+  @impl true
+  def subscribe(_task_ids, subscriber, _capacity, options) do
+    reference = make_ref()
+    send(Keyword.fetch!(options, :test), {:notification_subscribed, reference})
+    send(subscriber, TamaMCP.Notification.ready(reference))
+    send(subscriber, TamaMCP.Notification.overflow(reference))
+    {:ok, reference}
+  end
+
+  @impl true
+  def take(_subscription, _options), do: {:error, :overflow}
+
+  @impl true
+  def unsubscribe(_subscription, _options), do: :ok
+
+  @impl true
+  def publish(_task, _options), do: :ok
 end
 
 defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.OverflowNotification do
@@ -115,6 +208,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
   import Plug.Test
 
   alias TamaMCP.Authorization
+  alias TamaMCP.Notification
   alias TamaMCP.Notification.Local
   alias TamaMCP.{Protocol, Task}
   alias TamaMCP.TestSupport.Tasks.Store
@@ -191,6 +285,20 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     assert get_in(acknowledgement, ["params", "notifications", "taskIds"]) == [task.id]
   end
 
+  test "omits task filters that the client did not request", %{runtime: runtime} do
+    stream =
+      start_stream(runtime, [],
+        capabilities: false,
+        notifications: %{"toolsListChanged" => true}
+      )
+
+    assert_receive {:invalidation_registered, _, _}, 1_000
+    conn = Elixir.Task.await(stream, 1_000)
+    [acknowledgement | _events] = data_events(conn)
+
+    assert acknowledgement["params"]["notifications"] == %{}
+  end
+
   test "requires the Tasks capability only when task IDs are requested", %{runtime: runtime} do
     conn = runtime |> request(["task-phase3-1"], capabilities: false) |> MCPPlug.call(runtime)
 
@@ -254,6 +362,43 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     conn = Elixir.Task.await(stream, 1_000)
 
     assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert [acknowledgement, closing] = data_events(conn)
+    assert acknowledgement["method"] == Protocol.notification(:subscriptions_acknowledged)
+    assert closing["result"]["resultType"] == "complete"
+  end
+
+  test "delivery rechecks credential expiry after durable task lookups", %{
+    store: store,
+    notification: notification,
+    authorization: authorization,
+    task: task
+  } do
+    {:ok, gate} = Agent.start_link(fn -> :pass end)
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        task_store: __MODULE__.BlockingStore,
+        task_store_options: [agent: store, gate: gate, test: self()],
+        limits: [
+          stream_keepalive_interval_ms: 1_000,
+          stream_authorization_recheck_ms: 1_000,
+          stream_max_lifetime_ms: 500
+        ]
+      )
+
+    stream = start_stream(runtime, [task.id])
+    assert_receive {:invalidation_registered, stream_pid, _reference}, 1_000
+
+    expires_at = DateTime.add(DateTime.utc_now(), 50, :millisecond)
+    Agent.update(authorization, &%{&1 | expires_at: expires_at})
+    Agent.update(gate, fn _state -> :block end)
+    assert :ok = Local.publish(task, server: notification)
+    assert_receive {:task_get_blocked, ^stream_pid, reference}, 1_000
+
+    wait_until_expired(expires_at)
+    send(stream_pid, {:continue_task_get, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
     assert [acknowledgement, closing] = data_events(conn)
     assert acknowledgement["method"] == Protocol.notification(:subscriptions_acknowledged)
     assert closing["result"]["resultType"] == "complete"
@@ -354,6 +499,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     end
   end
 
+  test "cleanup drains queued signals for a closed subscription", %{
+    store: store,
+    authorization: authorization,
+    task: task
+  } do
+    runtime =
+      runtime(store, __MODULE__.QueuedOverflowNotification, authorization, self(),
+        notification_options: [test: self()]
+      )
+
+    conn = runtime |> request([task.id], []) |> MCPPlug.call(runtime)
+    assert conn.status == 200
+    assert_receive {:notification_subscribed, subscription}, 1_000
+
+    refute_receive {Notification, ^subscription, :ready}, 0
+    refute_receive {Notification, ^subscription, :overflow}, 0
+  end
+
   test "emits keepalive comments and closes at the credential deadline", %{
     store: store,
     notification: notification,
@@ -407,6 +570,41 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
              "max_task_ids_per_subscription"
   end
 
+  test "rechecks credential expiry immediately before acknowledging the stream", %{
+    runtime: runtime,
+    authorization: authorization,
+    task: task
+  } do
+    expires_at = DateTime.add(DateTime.utc_now(), 50, :millisecond)
+    Agent.update(authorization, &Map.merge(&1, %{expires_at: expires_at, registration: :block}))
+
+    stream = start_stream(runtime, [task.id])
+
+    assert_receive {:invalidation_registration_blocked, stream_pid, reference}, 1_000
+    wait_until_expired(expires_at)
+    send(stream_pid, {:continue_invalidation_registration, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert conn.status == 401
+    assert Jason.decode!(conn.resp_body)["error"]["message"] == "Credential has expired"
+    assert_receive {:invalidation_unregistered, ^reference}, 1_000
+  end
+
+  test "returns the committed connection when the acknowledgement chunk fails", %{
+    runtime: runtime,
+    task: task
+  } do
+    conn = request(runtime, [task.id], [])
+    {_adapter, payload} = conn.adapter
+    conn = %{conn | adapter: {__MODULE__.FirstChunkClosedAdapter, payload}}
+
+    conn = MCPPlug.call(conn, runtime)
+
+    assert conn.status == 200
+    assert conn.state == :chunked
+    assert conn.resp_body == ""
+  end
+
   test "contains notification adapter failures before response streaming", %{
     store: store,
     authorization: authorization,
@@ -446,14 +644,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
 
   defp runtime(store, notification, authorization, test, options \\ []) do
     notification_options = Keyword.get(options, :notification_options, server: notification)
+    task_store = Keyword.get(options, :task_store, Store)
+    task_store_options = Keyword.get(options, :task_store_options, agent: store)
 
     runtime_options = [
       server: TamaMCP.TestSupport.TaskRequiredServer,
       authorization: __MODULE__.Authorization,
       authorization_options: [agent: authorization, test: test],
       cache: TamaMCP.TestSupport.Cache,
-      task_store: Store,
-      task_store_options: [agent: store],
+      task_store: task_store,
+      task_store_options: task_store_options,
       task_runner: TamaMCP.TestSupport.Tasks.Runner,
       clock: TamaMCP.TestSupport.Tasks.Clock,
       identifier: TamaMCP.TestSupport.Tasks.Identifier,
@@ -517,13 +717,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
         do: %{Protocol.tasks_extension() => %{}},
         else: %{}
 
+    notifications = Keyword.get(options, :notifications, %{"taskIds" => task_ids})
+
     params = %{
       "_meta" => %{
         Protocol.meta_key(:protocol_version) => @version,
         Protocol.meta_key(:client_capabilities) => %{"extensions" => extensions},
         Protocol.meta_key(:client_info) => %{"name" => "phase3-test", "version" => "1.0.0"}
       },
-      "notifications" => %{"taskIds" => task_ids}
+      "notifications" => notifications
     }
 
     body =
@@ -551,6 +753,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     |> String.split("\n\n", trim: true)
     |> Enum.filter(&String.starts_with?(&1, "data: "))
     |> Enum.map(fn "data: " <> json -> Jason.decode!(json) end)
+  end
+
+  defp wait_until_expired(expires_at) do
+    remaining = DateTime.diff(expires_at, DateTime.utc_now(), :millisecond)
+    if remaining >= 0, do: Process.sleep(remaining + 2)
   end
 
   @doc false

@@ -106,13 +106,41 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
          runtime,
          base
        ) do
-    with {:ok, acknowledgement} <- acknowledgement(request.request_id, task_ids, runtime),
-         {:ok, conn} <- open(conn, acknowledgement) do
-      state = stream_state(conn, request, decision, task_ids, subscription, invalidation, runtime)
-      Events.emit(runtime, [:subscription, :open], %{}, Map.put(base, :status, :ok))
-      Events.emit(runtime, [:subscription, :acknowledgement], %{}, Map.put(base, :status, :ok))
+    acknowledgement_result =
+      acknowledgement(request.request_id, request.params["notifications"], task_ids, runtime)
 
-      finish_stream(loop(state), runtime, base)
+    with {:ok, acknowledgement} <- acknowledgement_result,
+         :ok <- validate_credential(decision) do
+      case open(conn, acknowledgement) do
+        {:ok, conn} ->
+          state =
+            stream_state(
+              conn,
+              request,
+              decision,
+              task_ids,
+              subscription,
+              invalidation,
+              runtime
+            )
+
+          Events.emit(runtime, [:subscription, :open], %{}, Map.put(base, :status, :ok))
+
+          Events.emit(
+            runtime,
+            [:subscription, :acknowledgement],
+            %{},
+            Map.put(base, :status, :ok)
+          )
+
+          finish_stream(loop(state), runtime, base)
+
+        {:transport_closed, conn} ->
+          finish_stream({conn, :transport_closed}, runtime, base)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -223,7 +251,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
       |> put_resp_header("cache-control", "no-cache")
       |> send_chunked(200)
 
-    chunk_event(conn, acknowledgement)
+    case chunk_event(conn, acknowledgement) do
+      {:ok, conn} -> {:ok, conn}
+      {:error, _reason} -> {:transport_closed, conn}
+    end
   rescue
     _exception -> {:error, :stream_open_failed}
   catch
@@ -347,7 +378,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
          true <- Decision.valid?(decision),
          false <- expired?(decision),
          true <- decision.owner_key == state.owner_key,
-         {:ok, tasks} <- visible_tasks(state.task_ids, decision.owner_key, runtime) do
+         {:ok, tasks} <- visible_tasks(state.task_ids, decision.owner_key, runtime),
+         false <- expired?(decision) do
       now = now_ms()
 
       {:ok,
@@ -433,8 +465,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     end
   end
 
-  defp acknowledgement(subscription_id, task_ids, runtime) do
-    notifications = %{"taskIds" => task_ids}
+  defp acknowledgement(subscription_id, requested, task_ids, runtime) do
+    notifications = acknowledged_notifications(requested, task_ids)
 
     value = %{
       "jsonrpc" => "2.0",
@@ -459,6 +491,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
          :ok <- validate_size(value, runtime) do
       {:ok, value}
     end
+  end
+
+  defp acknowledged_notifications(requested, task_ids) do
+    if Map.has_key?(requested, "taskIds"), do: %{"taskIds" => task_ids}, else: %{}
   end
 
   defp task_notification(task, subscription_id, runtime) do
@@ -571,6 +607,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     if not is_nil(subscription),
       do: adapter(runtime, :unsubscribe, [subscription, runtime.notification_options])
 
+    flush_notification_signals(subscription)
+
     if not is_nil(invalidation),
       do:
         authorization(runtime, :unregister_invalidation, [
@@ -579,6 +617,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
         ])
 
     :ok
+  end
+
+  defp flush_notification_signals(nil), do: :ok
+
+  defp flush_notification_signals(subscription) do
+    receive do
+      {Notification, ^subscription, signal} when signal in [:ready, :overflow] ->
+        flush_notification_signals(subscription)
+    after
+      0 -> :ok
+    end
   end
 
   defp adapter(runtime, function, arguments),
