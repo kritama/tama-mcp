@@ -65,7 +65,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.Authorization do
 
   @impl true
   def unregister_invalidation(reference, options) do
-    send(Keyword.fetch!(options, :test), {:invalidation_unregistered, reference})
+    state = Agent.get(Keyword.fetch!(options, :agent), & &1)
+    test = Keyword.fetch!(options, :test)
+
+    if Map.get(state, :invalidate_on_unregister, false),
+      do: send(self(), TamaMCP.Authorization.invalidation(reference))
+
+    send(test, {:invalidation_unregistered, reference})
     :ok
   end
 end
@@ -333,6 +339,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
   } do
     stream = start_stream(runtime, [task.id])
     assert_receive {:invalidation_registered, stream_pid, reference}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
 
     Agent.update(authorization, &%{&1 | mode: :deny})
     send(stream_pid, Authorization.invalidation(reference))
@@ -356,6 +363,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
   } do
     stream = start_stream(runtime, [task.id])
     assert_receive {:invalidation_registered, stream_pid, _reference}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
 
     Agent.update(authorization, &%{&1 | mode: :deny})
     assert :ok = Local.publish(task, server: notification)
@@ -388,6 +396,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
 
     stream = start_stream(runtime, [task.id])
     assert_receive {:invalidation_registered, stream_pid, _reference}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
 
     expires_at = DateTime.add(DateTime.utc_now(), 50, :millisecond)
     Agent.update(authorization, &%{&1 | expires_at: expires_at})
@@ -453,6 +462,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
 
     stream = start_stream(runtime, [task.id])
     assert_receive {:invalidation_registered, stream_pid, _}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
     Agent.update(authorization, &%{&1 | owner_key: "changed-owner"})
     conn = Elixir.Task.await(stream, 1_000)
 
@@ -517,13 +527,26 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     refute_receive {Notification, ^subscription, :overflow}, 0
   end
 
+  test "cleanup drains queued authorization invalidations", %{
+    runtime: runtime,
+    authorization: authorization
+  } do
+    Agent.update(authorization, &Map.put(&1, :invalidate_on_unregister, true))
+
+    conn = runtime |> request([], []) |> MCPPlug.call(runtime)
+    assert conn.status == 200
+    assert_receive {:invalidation_registered, _, reference}, 1_000
+    assert_receive {:invalidation_unregistered, ^reference}, 1_000
+    refute_receive {Authorization, ^reference, :invalidated}, 0
+  end
+
   test "emits keepalive comments and closes at the credential deadline", %{
     store: store,
     notification: notification,
     authorization: authorization,
     task: task
   } do
-    expires_at = DateTime.add(DateTime.utc_now(), 40, :millisecond)
+    expires_at = DateTime.add(DateTime.utc_now(), 150, :millisecond)
     Agent.update(authorization, &%{&1 | expires_at: expires_at})
 
     runtime =
@@ -587,6 +610,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     conn = Elixir.Task.await(stream, 1_000)
     assert conn.status == 401
     assert Jason.decode!(conn.resp_body)["error"]["message"] == "Credential has expired"
+    assert_receive {:invalidation_unregistered, ^reference}, 1_000
+  end
+
+  test "reauthorizes changed policy immediately before acknowledging the stream", %{
+    runtime: runtime,
+    authorization: authorization,
+    task: task
+  } do
+    Agent.update(authorization, &Map.put(&1, :registration, :block))
+    stream = start_stream(runtime, [task.id])
+
+    assert_receive {:invalidation_registration_blocked, stream_pid, reference}, 1_000
+    Agent.update(authorization, &%{&1 | mode: :deny})
+    send(stream_pid, {:continue_invalidation_registration, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"]["message"] == "credential rejected"
     assert_receive {:invalidation_unregistered, ^reference}, 1_000
   end
 

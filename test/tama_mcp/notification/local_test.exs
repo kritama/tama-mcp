@@ -38,7 +38,7 @@ defmodule TamaMCP.Notification.LocalTest do
 
   setup do
     notification = start_supervised!(Local)
-    {:ok, options: [server: notification]}
+    {:ok, notification: notification, options: [server: notification]}
   end
 
   test "delivers subscribed task snapshots through a bounded pull queue", %{options: options} do
@@ -51,9 +51,10 @@ defmodule TamaMCP.Notification.LocalTest do
     refute_receive {Notification, ^subscription, :ready}
 
     assert :ok = Local.publish(first, options)
-    assert :ok = Local.publish(second, options)
     assert_receive {Notification, ^subscription, :ready}
     assert {:ok, ^first} = Local.take(subscription, options)
+
+    assert :ok = Local.publish(second, options)
     assert_receive {Notification, ^subscription, :ready}
     assert {:ok, ^second} = Local.take(subscription, options)
     assert :empty = Local.take(subscription, options)
@@ -63,9 +64,9 @@ defmodule TamaMCP.Notification.LocalTest do
     options: options
   } do
     first = task("task-1", 0)
-    second = task("task-1", 1)
+    second = task("task-2", 0)
 
-    assert {:ok, subscription} = Local.subscribe([first.id], self(), 1, options)
+    assert {:ok, subscription} = Local.subscribe([first.id, second.id], self(), 1, options)
     assert :ok = Local.publish(first, options)
     assert :ok = Local.publish(second, options)
 
@@ -74,6 +75,30 @@ defmodule TamaMCP.Notification.LocalTest do
     assert {:error, :overflow} = Local.take(subscription, options)
     assert :ok = Local.unsubscribe(subscription, options)
     assert {:error, :closed} = Local.take(subscription, options)
+  end
+
+  test "coalesces a publication burst before it reaches the adapter mailbox", %{
+    notification: notification,
+    options: options
+  } do
+    assert {:ok, subscription} = Local.subscribe(["task-1"], self(), 2, options)
+    latest = task("task-1", 500)
+    :ok = :sys.suspend(notification)
+
+    try do
+      for revision <- 1..500 do
+        assert :ok = Local.publish(task("task-1", revision), options)
+      end
+
+      assert {:message_queue_len, length} = Process.info(notification, :message_queue_len)
+      assert length <= 1
+    after
+      :ok = :sys.resume(notification)
+    end
+
+    assert_receive {Notification, ^subscription, :ready}
+    assert {:ok, ^latest} = Local.take(subscription, options)
+    assert :empty = Local.take(subscription, options)
   end
 
   test "unsubscribe is idempotent and dead subscribers are removed", %{options: options} do

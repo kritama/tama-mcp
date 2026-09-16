@@ -110,7 +110,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
       acknowledgement(request.request_id, request.params["notifications"], task_ids, runtime)
 
     with {:ok, acknowledgement} <- acknowledgement_result,
-         :ok <- validate_credential(decision) do
+         {:ok, decision} <- reauthorize_before_open(conn, decision, task_ids, runtime) do
       case open(conn, acknowledgement) do
         {:ok, conn} ->
           state =
@@ -366,6 +366,34 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     end
   end
 
+  defp reauthorize_before_open(conn, previous, task_ids, runtime) do
+    with {:ok, %Decision{} = decision} <-
+           authorization(runtime, :reauthorize, [
+             conn,
+             previous,
+             runtime.authorization_options
+           ]),
+         true <- Decision.valid?(decision),
+         true <- decision.owner_key == previous.owner_key,
+         :ok <- validate_credential(decision),
+         {:ok, _tasks} <- visible_tasks(task_ids, decision.owner_key, runtime),
+         :ok <- validate_credential(decision) do
+      {:ok, decision}
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, %Error{} = error, status, authenticate} ->
+        {:error, error, status, authenticate}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _denied ->
+        {:error, :authorization_rejected}
+    end
+  end
+
   defp reauthorize(state) do
     runtime = state.runtime
 
@@ -616,6 +644,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
           runtime.authorization_options
         ])
 
+    flush_authorization_signals(invalidation)
+
     :ok
   end
 
@@ -625,6 +655,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     receive do
       {Notification, ^subscription, signal} when signal in [:ready, :overflow] ->
         flush_notification_signals(subscription)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp flush_authorization_signals(nil), do: :ok
+
+  defp flush_authorization_signals(invalidation) do
+    receive do
+      {Authorization, ^invalidation, :invalidated} ->
+        flush_authorization_signals(invalidation)
     after
       0 -> :ok
     end

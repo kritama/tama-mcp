@@ -13,8 +13,10 @@ defmodule TamaMCP.Notification do
 
   An adapter sends `ready/1` when `take/2` can return a queued snapshot and
   `overflow/1` when the subscriber has exceeded its configured capacity. A
-  ready signal may be coalesced, but an adapter must never exceed the capacity
-  supplied to `subscribe/4` or allow publisher work to wait on stream I/O.
+  ready signal may be coalesced. An adapter may also coalesce multiple pending
+  snapshots for the same task because the transport re-fetches current durable
+  state before delivery. It must never exceed the capacity supplied to
+  `subscribe/4` or allow publisher work to wait on stream I/O.
   """
 
   alias TamaMCP.{Error, Task}

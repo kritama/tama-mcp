@@ -1060,6 +1060,12 @@ Slow or disconnected subscribers must not block task transitions or exhaust an
 unbounded mailbox. The stream applies bounded buffering and closes lagging
 subscribers so they can recover through `tasks/get`.
 
+The process-local reference adapter coalesces pending ingress by subscribed
+task ID outside the adapter process mailbox and sends at most one wake-up while
+ingress is pending. Its ingress is therefore bounded by the active subscription
+index. Coalescing is safe because every delivery re-fetches the current task
+from durable storage and notifications have no replay guarantee.
+
 ## 15. Authorization and TamaOAuth
 
 TamaMCP composes TamaOAuth rather than reimplementing OAuth.

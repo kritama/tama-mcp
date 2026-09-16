@@ -2,11 +2,12 @@ defmodule TamaMCP.Notification.Local do
   @moduledoc """
   Process-local reference implementation of `TamaMCP.Notification`.
 
-  The adapter keeps each subscription queue inside one GenServer and sends at
-  most one wake-up message while data is pending. When the configured capacity
-  would be exceeded, it drops the queue, stops routing publications to that
-  subscription, and signals overflow. This bounds both adapter state and the
-  subscriber mailbox.
+  The adapter coalesces ingress by subscribed task ID in ETS, wakes its
+  GenServer at most once while ingress is pending, and keeps each subscription
+  queue inside the GenServer. When the configured capacity would be exceeded,
+  it drops the queue, stops routing publications to that subscription, and
+  signals overflow. This bounds ingress, adapter state, and the subscriber
+  mailbox without making publishers wait on stream I/O.
 
   Start the adapter under the host supervision tree and pass its pid or name as
   `:server` in `:notification_options`.
@@ -17,6 +18,8 @@ defmodule TamaMCP.Notification.Local do
   @behaviour TamaMCP.Notification
 
   alias TamaMCP.{Error, Notification, Task}
+
+  @ingress_key {__MODULE__, :ingress}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -49,17 +52,31 @@ defmodule TamaMCP.Notification.Local do
 
   @impl true
   def publish(%Task{} = task, options) do
-    case server(options) do
-      nil -> {:error, Error.internal()}
-      server -> GenServer.cast(server, {:publish, task})
+    case ingress(options) do
+      {:ok, server, table} -> publish_ingress(server, table, task)
+      :error -> {:error, Error.internal()}
     end
+  rescue
+    _exception -> {:error, Error.internal()}
+  catch
+    _kind, _reason -> {:error, Error.internal()}
   end
 
   def publish(_task, _options), do: {:error, Error.internal()}
 
   @impl true
   def init(_options) do
-    {:ok, %{subscriptions: %{}, task_subscriptions: %{}, monitors: %{}}}
+    ingress =
+      :ets.new(__MODULE__, [
+        :set,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+
+    Process.put(@ingress_key, ingress)
+
+    {:ok, %{subscriptions: %{}, task_subscriptions: %{}, monitors: %{}, ingress: ingress}}
   end
 
   @impl true
@@ -104,12 +121,11 @@ defmodule TamaMCP.Notification.Local do
   end
 
   @impl true
-  def handle_cast({:publish, %Task{} = task}, state) do
-    subscriptions = Map.get(state.task_subscriptions, task.id, MapSet.new())
-    {:noreply, Enum.reduce(subscriptions, state, &enqueue(&1, task, &2))}
+  def handle_info({__MODULE__, ingress, :ready}, %{ingress: ingress} = state) do
+    :ets.delete(ingress, :wake)
+    {:noreply, drain_ingress(state)}
   end
 
-  @impl true
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
     case Map.get(state.monitors, monitor) do
       nil -> {:noreply, state}
@@ -157,8 +173,32 @@ defmodule TamaMCP.Notification.Local do
     end
   end
 
+  defp drain_ingress(state) do
+    state.ingress
+    |> :ets.select([{{{:task, :"$1"}, :_}, [], [:"$1"]}])
+    |> Enum.reduce(state, &drain_task(&2, &1))
+  end
+
+  defp drain_task(state, task_id) do
+    case :ets.take(state.ingress, {:task, task_id}) do
+      [{{:task, ^task_id}, %Task{} = task}] ->
+        subscriptions = Map.get(state.task_subscriptions, task_id, MapSet.new())
+        Enum.reduce(subscriptions, state, &enqueue(&1, task, &2))
+
+      _missing_or_invalid ->
+        state
+    end
+  end
+
   defp index(state, subscription, task_ids) do
     Enum.reduce(task_ids, state, fn task_id, acc ->
+      :ets.update_counter(
+        acc.ingress,
+        {:subscribed, task_id},
+        {2, 1},
+        {{:subscribed, task_id}, 0}
+      )
+
       update_in(acc, [:task_subscriptions, task_id], fn subscriptions ->
         MapSet.put(subscriptions || MapSet.new(), subscription)
       end)
@@ -174,6 +214,13 @@ defmodule TamaMCP.Notification.Local do
       state.task_subscriptions
       |> Map.get(task_id, MapSet.new())
       |> MapSet.delete(subscription)
+
+    if MapSet.size(subscriptions) == 0 do
+      :ets.delete(state.ingress, {:subscribed, task_id})
+      :ets.delete(state.ingress, {:task, task_id})
+    else
+      :ets.update_counter(state.ingress, {:subscribed, task_id}, {2, -1})
+    end
 
     %{state | task_subscriptions: put_or_delete(state.task_subscriptions, task_id, subscriptions)}
   end
@@ -208,6 +255,28 @@ defmodule TamaMCP.Notification.Local do
     end
   catch
     :exit, _reason -> {:error, Error.internal()}
+  end
+
+  defp ingress(options) do
+    with server when not is_nil(server) <- server(options),
+         pid when is_pid(pid) <- GenServer.whereis(server),
+         {:dictionary, dictionary} <- Process.info(pid, :dictionary),
+         {@ingress_key, table} <- List.keyfind(dictionary, @ingress_key, 0) do
+      {:ok, pid, table}
+    else
+      _missing -> :error
+    end
+  end
+
+  defp publish_ingress(server, table, task) do
+    if :ets.member(table, {:subscribed, task.id}) do
+      :ets.insert(table, {{:task, task.id}, task})
+
+      if :ets.insert_new(table, {:wake, true}),
+        do: send(server, {__MODULE__, table, :ready})
+    end
+
+    :ok
   end
 
   defp server(options), do: Keyword.get(options, :server)
