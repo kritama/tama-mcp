@@ -198,6 +198,30 @@ defmodule TamaMCP.Notification.LocalTest do
     assert :empty = Local.take(large, options)
   end
 
+  test "cleans overflow state recreated after unsubscribe", %{
+    notification: notification,
+    options: options
+  } do
+    task = task("task-1", 0)
+    assert {:ok, subscription} = Local.subscribe([task.id], self(), 1, options)
+    ingress = ingress(notification)
+
+    assert :ok = Local.unsubscribe(subscription, options)
+
+    assert :ets.insert(ingress, [
+             {{:buffered, subscription}, 1},
+             {{:overflow, subscription}, true}
+           ])
+
+    send(notification, {Local, ingress, :ready})
+
+    assert eventually(fn ->
+             :ets.lookup(ingress, {:overflow, subscription}) == []
+           end)
+
+    assert :ets.lookup(ingress, {:buffered, subscription}) == []
+  end
+
   test "unsubscribe is idempotent and dead subscribers are removed", %{options: options} do
     task = task("task-1", 0)
 

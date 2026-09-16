@@ -196,8 +196,12 @@ defmodule TamaMCP.Notification.Local do
     case :ets.take(state.ingress, {:overflow, subscription}) do
       [{{:overflow, ^subscription}, true}] ->
         case Map.get(state.subscriptions, subscription) do
-          %{overflow: false} = entry -> overflow(subscription, entry, state)
-          _closed_or_overflowed -> state
+          %{overflow: false} = entry ->
+            overflow(subscription, entry, state)
+
+          _closed_or_overflowed ->
+            :ets.delete(state.ingress, {:buffered, subscription})
+            state
         end
 
       _missing_or_invalid ->
