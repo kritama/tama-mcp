@@ -90,7 +90,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.BlockingStore do
   def get(owner_key, task_id, options) do
     gate = Keyword.fetch!(options, :gate)
 
-    if Agent.get(gate, & &1) == :block do
+    block? =
+      Agent.get_and_update(gate, fn
+        {:pass_then_block, remaining} when remaining > 0 ->
+          {false, {:pass_then_block, remaining - 1}}
+
+        {:pass_then_block, 0} = state ->
+          {true, state}
+
+        :block ->
+          {true, :block}
+
+        state ->
+          {false, state}
+      end)
+
+    if block? do
       reference = make_ref()
       send(Keyword.fetch!(options, :test), {:task_get_blocked, self(), reference})
 
@@ -103,6 +118,31 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.BlockingStore do
 
     Store.get(owner_key, task_id, options)
   end
+
+  @impl true
+  def transition(owner_key, task_id, revision, status, attributes, options),
+    do: Store.transition(owner_key, task_id, revision, status, attributes, options)
+
+  @impl true
+  def update(owner_key, task_id, input_responses, options),
+    do: Store.update(owner_key, task_id, input_responses, options)
+
+  @impl true
+  def cancel(owner_key, task_id, options), do: Store.cancel(owner_key, task_id, options)
+end
+
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.MismatchedOwnerStore do
+  @moduledoc false
+
+  @behaviour TamaMCP.Task.Store
+
+  alias TamaMCP.TestSupport.Tasks.Store
+
+  @impl true
+  def create(task, options), do: Store.create(task, options)
+
+  @impl true
+  def get(_owner_key, task_id, options), do: Store.get(1.0, task_id, options)
 
   @impl true
   def transition(owner_key, task_id, revision, status, attributes, options),
@@ -381,7 +421,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     authorization: authorization,
     task: task
   } do
-    {:ok, gate} = Agent.start_link(fn -> :pass end)
+    {:ok, gate} = Agent.start_link(fn -> {:pass_then_block, 2} end)
 
     runtime =
       runtime(store, notification, authorization, self(),
@@ -400,7 +440,6 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
 
     expires_at = DateTime.add(DateTime.utc_now(), 50, :millisecond)
     Agent.update(authorization, &%{&1 | expires_at: expires_at})
-    Agent.update(gate, fn _state -> :block end)
     assert :ok = Local.publish(task, server: notification)
     assert_receive {:task_get_blocked, ^stream_pid, reference}, 1_000
 
@@ -413,11 +452,98 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     assert closing["result"]["resultType"] == "complete"
   end
 
+  test "delivery enforces the maximum stream lifetime after durable task lookups", %{
+    store: store,
+    notification: notification,
+    authorization: authorization,
+    task: task
+  } do
+    {:ok, gate} = Agent.start_link(fn -> {:pass_then_block, 2} end)
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        task_store: __MODULE__.BlockingStore,
+        task_store_options: [agent: store, gate: gate, test: self()],
+        limits: [
+          stream_keepalive_interval_ms: 1_000,
+          stream_authorization_recheck_ms: 1_000,
+          stream_max_lifetime_ms: 500
+        ]
+      )
+
+    stream = start_stream(runtime, [task.id])
+    assert_receive {:invalidation_registered, stream_pid, _reference}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+
+    assert :ok = Local.publish(task, server: notification)
+    assert_receive {:task_get_blocked, ^stream_pid, reference}, 1_000
+
+    Process.sleep(510)
+    send(stream_pid, {:continue_task_get, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert [acknowledgement, closing] = data_events(conn)
+    assert acknowledgement["method"] == Protocol.notification(:subscriptions_acknowledged)
+    assert closing["result"]["resultType"] == "complete"
+  end
+
+  test "uses exact owner identity for returned task snapshots", %{
+    store: store,
+    notification: notification,
+    authorization: authorization
+  } do
+    Agent.update(authorization, &%{&1 | owner_key: 1})
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        task_store: __MODULE__.MismatchedOwnerStore
+      )
+
+    task = create_task(runtime, store, 1.0, "task-numeric-owner")
+    stream = start_stream(runtime, [task.id])
+    conn = Elixir.Task.await(stream, 1_000)
+
+    assert conn.status == 500
+    assert data_events(conn) == []
+    assert Jason.decode!(conn.resp_body)["error"]["message"] == "Internal error"
+  end
+
+  test "uses exact owner identity across pre-open reauthorization", %{
+    store: store,
+    notification: notification,
+    authorization: authorization
+  } do
+    Agent.update(authorization, &Map.merge(&1, %{owner_key: 1, registration: :block}))
+    runtime = runtime(store, notification, authorization, self())
+    task = create_task(runtime, store, 1, "task-shared-numeric-owner")
+    _other = create_task(runtime, store, 1.0, task.id)
+    stream = start_stream(runtime, [task.id])
+
+    assert_receive {:invalidation_registration_blocked, stream_pid, reference}, 1_000
+    Agent.update(authorization, &%{&1 | owner_key: 1.0})
+    send(stream_pid, {:continue_invalidation_registration, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert conn.status == 500
+    assert Jason.decode!(conn.resp_body)["error"]["message"] == "Internal error"
+    assert_receive {:invalidation_unregistered, ^reference}, 1_000
+  end
+
   test "a delivery hint is resolved back through the durable store", %{
-    runtime: runtime,
+    store: store,
+    authorization: authorization,
     task: task,
     notification: notification
   } do
+    runtime =
+      runtime(store, notification, authorization, self(),
+        limits: [
+          stream_keepalive_interval_ms: 1_000,
+          stream_authorization_recheck_ms: 1_000,
+          stream_max_lifetime_ms: 500
+        ]
+      )
+
     stream = start_stream(runtime, [task.id])
     assert_receive {:invalidation_registered, _, _}, 1_000
 

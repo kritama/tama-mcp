@@ -351,9 +351,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     with {:ok, state, tasks} <- reauthorize(state),
          {:ok, task} <- Map.fetch(tasks, task_id),
          {:ok, notification} <- task_notification(task, state.request.request_id, state.runtime),
+         :ok <- validate_maximum_lifetime(state),
          {:ok, conn} <- chunk_event(state.conn, notification) do
       loop(%{state | conn: conn})
     else
+      {:error, :maximum_lifetime} -> graceful_close(state, :maximum_lifetime)
       {:error, reason} -> delivery_failure(state, close_reason(reason))
       :error -> delivery_failure(state, :task_not_authorized)
     end
@@ -374,7 +376,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
              runtime.authorization_options
            ]),
          true <- Decision.valid?(decision),
-         true <- decision.owner_key == previous.owner_key,
+         true <- decision.owner_key === previous.owner_key,
          :ok <- validate_credential(decision),
          {:ok, _tasks} <- visible_tasks(task_ids, decision.owner_key, runtime),
          :ok <- validate_credential(decision) do
@@ -405,7 +407,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
            ]),
          true <- Decision.valid?(decision),
          false <- expired?(decision),
-         true <- decision.owner_key == state.owner_key,
+         true <- decision.owner_key === state.owner_key,
          {:ok, tasks} <- visible_tasks(state.task_ids, decision.owner_key, runtime),
          false <- expired?(decision) do
       now = now_ms()
@@ -438,7 +440,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
 
     case safe_apply(runtime.task_store, :get, [owner_key, task_id, store_options]) do
       {:ok, %Task{} = task} ->
-        if task.owner_key == owner_key and task.id == task_id and
+        if task.owner_key === owner_key and task.id === task_id and
              Task.validate(task, Runtime.task_validation_options(runtime)) == :ok,
            do: {:ok, task},
            else: {:error, :invalid_task}
@@ -587,6 +589,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     _exception -> {:error, :closed}
   catch
     _kind, _reason -> {:error, :closed}
+  end
+
+  defp validate_maximum_lifetime(state) do
+    if now_ms() < state.maximum_deadline,
+      do: :ok,
+      else: {:error, :maximum_lifetime}
   end
 
   defp due(state) do

@@ -425,7 +425,7 @@ defmodule TamaMCP.ConformanceTest do
         limits: [
           stream_keepalive_interval_ms: 1_000,
           stream_authorization_recheck_ms: 1_000,
-          stream_max_lifetime_ms: 20
+          stream_max_lifetime_ms: 250
         ]
       )
 
