@@ -184,7 +184,9 @@ defmodule TamaMCP.Notification.Local do
       |> Enum.reduce(state, &drain_overflow(&2, &1))
 
     state.ingress
-    |> :ets.select([{{{:task, :"$1", :"$2"}, :_}, [], [{{:"$1", :"$2"}}]}])
+    |> :ets.select([
+      {{{:task, :"$1", :"$2"}, :ready, :_}, [], [{{:"$1", :"$2"}}]}
+    ])
     |> Enum.reduce(state, fn {subscription, task_id}, acc ->
       drain_task(acc, subscription, task_id)
     end)
@@ -205,7 +207,7 @@ defmodule TamaMCP.Notification.Local do
 
   defp drain_task(state, subscription, task_id) do
     case :ets.take(state.ingress, {:task, subscription, task_id}) do
-      [{{:task, ^subscription, ^task_id}, %Task{} = task}] ->
+      [{{:task, ^subscription, ^task_id}, :ready, %Task{} = task}] ->
         case subscription_status(state.ingress, subscription) do
           {:active, _capacity} -> enqueue(subscription, task, state)
           _closed_or_overflowed -> state
@@ -322,7 +324,7 @@ defmodule TamaMCP.Notification.Local do
   defp retain_active(table, subscription, capacity, task) do
     key = {:task, subscription, task.id}
 
-    if :ets.insert_new(table, {key, task}) do
+    if :ets.insert_new(table, {key, :reserving, task}) do
       buffered =
         :ets.update_counter(
           table,
@@ -340,7 +342,7 @@ defmodule TamaMCP.Notification.Local do
   defp retain_reserved(table, subscription, capacity, key, buffered) do
     case subscription_status(table, subscription) do
       {:active, ^capacity} when buffered <= capacity ->
-        true
+        publish_reserved(table, subscription, key)
 
       {:active, ^capacity} ->
         overflow_ingress(table, subscription, capacity)
@@ -351,15 +353,46 @@ defmodule TamaMCP.Notification.Local do
   end
 
   defp update_retained(table, subscription, capacity, key, task) do
-    case :ets.update_element(table, key, {2, task}) do
+    ready = {key, :ready, :_}
+    updated = {:const, {key, :ready, task}}
+
+    case :ets.select_replace(table, [{ready, [], [updated]}]) do
+      1 ->
+        retain_ready(table, subscription, capacity, key)
+
+      0 ->
+        update_reserving(table, subscription, key, task)
+    end
+  end
+
+  defp update_reserving(table, subscription, key, task) do
+    reserving = {key, :reserving, :_}
+    updated = {:const, {key, :reserving, task}}
+
+    case :ets.select_replace(table, [{reserving, [], [updated]}]) do
+      1 ->
+        false
+
+      0 ->
+        retain_for_subscription(table, subscription, task)
+    end
+  end
+
+  defp retain_ready(table, subscription, capacity, key) do
+    case subscription_status(table, subscription) do
+      {:active, ^capacity} -> true
+      _closed_or_overflowed -> discard_inactive(table, subscription, key)
+    end
+  end
+
+  defp publish_reserved(table, subscription, key) do
+    case :ets.update_element(table, key, {2, :ready}) do
       true ->
-        case subscription_status(table, subscription) do
-          {:active, ^capacity} -> true
-          _closed_or_overflowed -> discard_inactive(table, subscription, key)
-        end
+        true
 
       false ->
-        retain_for_subscription(table, subscription, task)
+        release_buffered(table, subscription)
+        false
     end
   end
 
@@ -370,7 +403,7 @@ defmodule TamaMCP.Notification.Local do
 
     case :ets.select_replace(table, [{active, [], [{:const, overflowed}]}]) do
       1 ->
-        :ets.match_delete(table, {{:task, subscription, :_}, :_})
+        :ets.match_delete(table, {{:task, subscription, :_}, :_, :_})
         :ets.insert(table, {{:buffered, subscription}, 0})
         :ets.insert(table, {{:overflow, subscription}, true})
         true

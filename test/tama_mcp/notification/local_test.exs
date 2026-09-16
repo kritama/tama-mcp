@@ -101,6 +101,51 @@ defmodule TamaMCP.Notification.LocalTest do
     assert :empty = Local.take(subscription, options)
   end
 
+  test "exposes ingress only after its buffer slot is reserved", %{
+    notification: notification,
+    options: options
+  } do
+    task = task("task-1", 0)
+    assert {:ok, subscription} = Local.subscribe([task.id], self(), 1, options)
+    :ok = :sys.suspend(notification)
+
+    try do
+      assert :ok = Local.publish(task, options)
+      ingress = ingress(notification)
+
+      assert :ets.lookup(ingress, {:buffered, subscription}) == [
+               {{:buffered, subscription}, 1}
+             ]
+
+      assert :ets.lookup(ingress, {:task, subscription, task.id}) == [
+               {{:task, subscription, task.id}, :ready, task}
+             ]
+    after
+      :ok = :sys.resume(notification)
+    end
+
+    assert_receive {Notification, ^subscription, :ready}
+    assert {:ok, ^task} = Local.take(subscription, options)
+  end
+
+  test "coalesces publications into an in-flight reservation", %{
+    notification: notification,
+    options: options
+  } do
+    first = task("task-1", 0)
+    latest = task("task-1", 1)
+    assert {:ok, subscription} = Local.subscribe([first.id], self(), 1, options)
+    ingress = ingress(notification)
+    key = {:task, subscription, first.id}
+
+    assert :ets.insert_new(ingress, {key, :reserving, first})
+    assert :ok = Local.publish(latest, options)
+    assert :ets.lookup(ingress, key) == [{key, :reserving, latest}]
+    refute_receive {Notification, ^subscription, :ready}
+
+    :ets.delete(ingress, key)
+  end
+
   test "bounds retained ingress by subscription capacity across distinct task IDs", %{
     notification: notification,
     options: options
@@ -123,6 +168,34 @@ defmodule TamaMCP.Notification.LocalTest do
 
     assert_receive {Notification, ^subscription, :overflow}
     assert {:error, :overflow} = Local.take(subscription, options)
+  end
+
+  test "keeps overlapping subscription capacities independent", %{
+    notification: notification,
+    options: options
+  } do
+    first = task("task-1", 0)
+    second = task("task-2", 0)
+    task_ids = [first.id, second.id]
+
+    assert {:ok, small} = Local.subscribe(task_ids, self(), 1, options)
+    assert {:ok, large} = Local.subscribe(task_ids, self(), 2, options)
+    :ok = :sys.suspend(notification)
+
+    try do
+      assert :ok = Local.publish(first, options)
+      assert :ok = Local.publish(second, options)
+      assert retained_snapshots(notification) == 2
+    after
+      :ok = :sys.resume(notification)
+    end
+
+    assert_receive {Notification, ^small, :overflow}
+    assert {:error, :overflow} = Local.take(small, options)
+
+    delivered = Enum.map(1..2, fn _index -> take_ready(large, options) end)
+    assert MapSet.new(delivered) == MapSet.new([first, second])
+    assert :empty = Local.take(large, options)
   end
 
   test "unsubscribe is idempotent and dead subscribers are removed", %{options: options} do
@@ -151,6 +224,39 @@ defmodule TamaMCP.Notification.LocalTest do
     assert {:error, %TamaMCP.Error{}} = Local.unsubscribe(:invalid, options)
     assert {:error, %TamaMCP.Error{}} = Local.publish(%{}, options)
     assert {:error, %TamaMCP.Error{}} = Local.publish(task("task-1", 0), [])
+  end
+
+  test "contains unavailable adapter and malformed ingress failures", %{
+    notification: notification
+  } do
+    dead_adapter = spawn(fn -> :ok end)
+    monitor = Process.monitor(dead_adapter)
+    assert_receive {:DOWN, ^monitor, :process, ^dead_adapter, :normal}
+
+    assert {:error, %TamaMCP.Error{}} =
+             Local.take(make_ref(), server: dead_adapter)
+
+    test = self()
+
+    malformed_adapter =
+      spawn(fn ->
+        Process.put({Local, :ingress}, :not_an_ets_table)
+        send(test, {:adapter_ready, self()})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:adapter_ready, ^malformed_adapter}
+
+    assert {:error, %TamaMCP.Error{}} =
+             Local.publish(task("task-1", 0), server: malformed_adapter)
+
+    send(malformed_adapter, :stop)
+
+    send(notification, {:DOWN, make_ref(), :process, self(), :normal})
+    assert %{subscriptions: %{}} = :sys.get_state(notification)
   end
 
   test "publish_committed contains failures and emits classified telemetry" do
@@ -206,15 +312,29 @@ defmodule TamaMCP.Notification.LocalTest do
   end
 
   defp retained_snapshots(notification) do
-    {:dictionary, dictionary} = Process.info(notification, :dictionary)
-    {{Local, :ingress}, ingress} = List.keyfind(dictionary, {Local, :ingress}, 0)
-
-    ingress
+    notification
+    |> ingress()
     |> :ets.tab2list()
     |> Enum.count(fn
-      {key, %Task{}} when is_tuple(key) -> elem(key, 0) == :task
-      _entry -> false
+      entry when is_tuple(entry) ->
+        key = elem(entry, 0)
+        is_tuple(key) and elem(key, 0) == :task
+
+      _entry ->
+        false
     end)
+  end
+
+  defp ingress(notification) do
+    {:dictionary, dictionary} = Process.info(notification, :dictionary)
+    {{Local, :ingress}, ingress} = List.keyfind(dictionary, {Local, :ingress}, 0)
+    ingress
+  end
+
+  defp take_ready(subscription, options) do
+    assert_receive {Notification, ^subscription, :ready}
+    assert {:ok, task} = Local.take(subscription, options)
+    task
   end
 
   defp eventually(fun, attempts \\ 20)
