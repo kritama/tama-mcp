@@ -2,12 +2,13 @@ defmodule TamaMCP.Notification.Local do
   @moduledoc """
   Process-local reference implementation of `TamaMCP.Notification`.
 
-  The adapter coalesces ingress by subscribed task ID in ETS, wakes its
+  The adapter coalesces ingress by task ID and subscription in ETS, wakes its
   GenServer at most once while ingress is pending, and keeps each subscription
-  queue inside the GenServer. When the configured capacity would be exceeded,
-  it drops the queue, stops routing publications to that subscription, and
-  signals overflow. This bounds ingress, adapter state, and the subscriber
-  mailbox without making publishers wait on stream I/O.
+  queue inside the GenServer. The configured capacity covers both retained
+  ingress and the queue. When that capacity would be exceeded, the adapter
+  drops both, stops routing publications to the subscription, and signals
+  overflow. This bounds ingress, adapter state, and the subscriber mailbox
+  without making publishers wait on stream I/O.
 
   Start the adapter under the host supervision tree and pass its pid or name as
   `:server` in `:notification_options`.
@@ -76,7 +77,7 @@ defmodule TamaMCP.Notification.Local do
 
     Process.put(@ingress_key, ingress)
 
-    {:ok, %{subscriptions: %{}, task_subscriptions: %{}, monitors: %{}, ingress: ingress}}
+    {:ok, %{subscriptions: %{}, monitors: %{}, ingress: ingress}}
   end
 
   @impl true
@@ -98,7 +99,7 @@ defmodule TamaMCP.Notification.Local do
       state
       |> put_in([:subscriptions, subscription], entry)
       |> put_in([:monitors, monitor], subscription)
-      |> index(subscription, entry.task_ids)
+      |> index(subscription, entry.task_ids, capacity)
 
     {:reply, {:ok, subscription}, state}
   end
@@ -112,7 +113,7 @@ defmodule TamaMCP.Notification.Local do
         {:reply, {:error, :overflow}, state}
 
       entry ->
-        take_entry(subscription, entry, state)
+        take_active(subscription, entry, state)
     end
   end
 
@@ -137,6 +138,7 @@ defmodule TamaMCP.Notification.Local do
     case :queue.out(entry.queue) do
       {{:value, task}, queue} ->
         updated = %{entry | queue: queue, size: entry.size - 1}
+        release_buffered(state.ingress, subscription)
 
         if updated.size > 0,
           do: send(updated.subscriber, Notification.ready(subscription))
@@ -145,6 +147,17 @@ defmodule TamaMCP.Notification.Local do
 
       {:empty, _queue} ->
         {:reply, :empty, state}
+    end
+  end
+
+  defp take_active(subscription, entry, state) do
+    case subscription_status(state.ingress, subscription) do
+      {:overflow, _capacity} ->
+        state = overflow(subscription, entry, state)
+        {:reply, {:error, :overflow}, state}
+
+      _active_or_closing ->
+        take_entry(subscription, entry, state)
     end
   end
 
@@ -157,16 +170,7 @@ defmodule TamaMCP.Notification.Local do
         put_in(state, [:subscriptions, subscription], updated)
 
       %{overflow: false} = entry ->
-        send(entry.subscriber, Notification.overflow(subscription))
-
-        state
-        |> unindex(subscription, entry.task_ids)
-        |> put_in([:subscriptions, subscription], %{
-          entry
-          | queue: :queue.new(),
-            size: 0,
-            overflow: true
-        })
+        overflow(subscription, entry, state)
 
       _closed_or_overflowed ->
         state
@@ -174,55 +178,70 @@ defmodule TamaMCP.Notification.Local do
   end
 
   defp drain_ingress(state) do
+    state =
+      state.ingress
+      |> :ets.select([{{{:overflow, :"$1"}, :_}, [], [:"$1"]}])
+      |> Enum.reduce(state, &drain_overflow(&2, &1))
+
     state.ingress
-    |> :ets.select([{{{:task, :"$1"}, :_}, [], [:"$1"]}])
-    |> Enum.reduce(state, &drain_task(&2, &1))
+    |> :ets.select([{{{:task, :"$1", :"$2"}, :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.reduce(state, fn {subscription, task_id}, acc ->
+      drain_task(acc, subscription, task_id)
+    end)
   end
 
-  defp drain_task(state, task_id) do
-    case :ets.take(state.ingress, {:task, task_id}) do
-      [{{:task, ^task_id}, %Task{} = task}] ->
-        subscriptions = Map.get(state.task_subscriptions, task_id, MapSet.new())
-        Enum.reduce(subscriptions, state, &enqueue(&1, task, &2))
+  defp drain_overflow(state, subscription) do
+    case :ets.take(state.ingress, {:overflow, subscription}) do
+      [{{:overflow, ^subscription}, true}] ->
+        case Map.get(state.subscriptions, subscription) do
+          %{overflow: false} = entry -> overflow(subscription, entry, state)
+          _closed_or_overflowed -> state
+        end
 
       _missing_or_invalid ->
         state
     end
   end
 
-  defp index(state, subscription, task_ids) do
-    Enum.reduce(task_ids, state, fn task_id, acc ->
-      :ets.update_counter(
-        acc.ingress,
-        {:subscribed, task_id},
-        {2, 1},
-        {{:subscribed, task_id}, 0}
-      )
+  defp drain_task(state, subscription, task_id) do
+    case :ets.take(state.ingress, {:task, subscription, task_id}) do
+      [{{:task, ^subscription, ^task_id}, %Task{} = task}] ->
+        case subscription_status(state.ingress, subscription) do
+          {:active, _capacity} -> enqueue(subscription, task, state)
+          _closed_or_overflowed -> state
+        end
 
-      update_in(acc, [:task_subscriptions, task_id], fn subscriptions ->
-        MapSet.put(subscriptions || MapSet.new(), subscription)
-      end)
+      _missing_or_invalid ->
+        state
+    end
+  end
+
+  defp index(state, subscription, task_ids, capacity) do
+    :ets.insert(state.ingress, [
+      {{:subscription, subscription}, :active, capacity},
+      {{:buffered, subscription}, 0}
+    ])
+
+    Enum.each(task_ids, fn task_id ->
+      :ets.insert(state.ingress, {{:route, task_id, subscription}, true})
     end)
+
+    state
   end
 
   defp unindex(state, subscription, task_ids) do
-    Enum.reduce(task_ids, state, &unindex_task(&2, &1, subscription))
-  end
+    :ets.insert(state.ingress, {{:subscription, subscription}, :closed, 0})
 
-  defp unindex_task(state, task_id, subscription) do
-    subscriptions =
-      state.task_subscriptions
-      |> Map.get(task_id, MapSet.new())
-      |> MapSet.delete(subscription)
+    Enum.each(task_ids, fn task_id ->
+      :ets.delete(state.ingress, {:route, task_id, subscription})
+      :ets.delete(state.ingress, {:task, subscription, task_id})
+    end)
 
-    if MapSet.size(subscriptions) == 0 do
-      :ets.delete(state.ingress, {:subscribed, task_id})
-      :ets.delete(state.ingress, {:task, task_id})
-    else
-      :ets.update_counter(state.ingress, {:subscribed, task_id}, {2, -1})
-    end
+    :ets.delete(state.ingress, {:overflow, subscription})
+    :ets.delete(state.ingress, {:buffered, subscription})
+    :ets.delete(state.ingress, {:subscription, subscription})
 
-    %{state | task_subscriptions: put_or_delete(state.task_subscriptions, task_id, subscriptions)}
+    state
   end
 
   defp remove(state, subscription, demonitor? \\ true) do
@@ -242,10 +261,17 @@ defmodule TamaMCP.Notification.Local do
     end
   end
 
-  defp put_or_delete(index, task_id, subscriptions) do
-    if MapSet.size(subscriptions) == 0,
-      do: Map.delete(index, task_id),
-      else: Map.put(index, task_id, subscriptions)
+  defp overflow(subscription, entry, state) do
+    send(entry.subscriber, Notification.overflow(subscription))
+
+    state
+    |> unindex(subscription, entry.task_ids)
+    |> put_in([:subscriptions, subscription], %{
+      entry
+      | queue: :queue.new(),
+        size: 0,
+        overflow: true
+    })
   end
 
   defp call(options, message) do
@@ -269,14 +295,109 @@ defmodule TamaMCP.Notification.Local do
   end
 
   defp publish_ingress(server, table, task) do
-    if :ets.member(table, {:subscribed, task.id}) do
-      :ets.insert(table, {{:task, task.id}, task})
+    wake? =
+      table
+      |> subscriptions_for(task.id)
+      |> Enum.reduce(false, fn subscription, pending? ->
+        retain_for_subscription(table, subscription, task) or pending?
+      end)
 
-      if :ets.insert_new(table, {:wake, true}),
-        do: send(server, {__MODULE__, table, :ready})
-    end
+    if wake? and :ets.insert_new(table, {:wake, true}),
+      do: send(server, {__MODULE__, table, :ready})
 
     :ok
+  end
+
+  defp subscriptions_for(table, task_id) do
+    :ets.select(table, [{{{:route, task_id, :"$1"}, :_}, [], [:"$1"]}])
+  end
+
+  defp retain_for_subscription(table, subscription, task) do
+    case subscription_status(table, subscription) do
+      {:active, capacity} -> retain_active(table, subscription, capacity, task)
+      _closed_or_overflowed -> false
+    end
+  end
+
+  defp retain_active(table, subscription, capacity, task) do
+    key = {:task, subscription, task.id}
+
+    if :ets.insert_new(table, {key, task}) do
+      buffered =
+        :ets.update_counter(
+          table,
+          {:buffered, subscription},
+          {2, 1},
+          {{:buffered, subscription}, 0}
+        )
+
+      retain_reserved(table, subscription, capacity, key, buffered)
+    else
+      update_retained(table, subscription, capacity, key, task)
+    end
+  end
+
+  defp retain_reserved(table, subscription, capacity, key, buffered) do
+    case subscription_status(table, subscription) do
+      {:active, ^capacity} when buffered <= capacity ->
+        true
+
+      {:active, ^capacity} ->
+        overflow_ingress(table, subscription, capacity)
+
+      _closed_or_overflowed ->
+        discard_inactive(table, subscription, key)
+    end
+  end
+
+  defp update_retained(table, subscription, capacity, key, task) do
+    case :ets.update_element(table, key, {2, task}) do
+      true ->
+        case subscription_status(table, subscription) do
+          {:active, ^capacity} -> true
+          _closed_or_overflowed -> discard_inactive(table, subscription, key)
+        end
+
+      false ->
+        retain_for_subscription(table, subscription, task)
+    end
+  end
+
+  defp overflow_ingress(table, subscription, capacity) do
+    key = {:subscription, subscription}
+    active = {key, :active, capacity}
+    overflowed = {key, :overflow, capacity}
+
+    case :ets.select_replace(table, [{active, [], [{:const, overflowed}]}]) do
+      1 ->
+        :ets.match_delete(table, {{:task, subscription, :_}, :_})
+        :ets.insert(table, {{:buffered, subscription}, 0})
+        :ets.insert(table, {{:overflow, subscription}, true})
+        true
+
+      0 ->
+        false
+    end
+  end
+
+  defp subscription_status(table, subscription) do
+    case :ets.lookup(table, {:subscription, subscription}) do
+      [{{:subscription, ^subscription}, status, capacity}] -> {status, capacity}
+      _missing_or_invalid -> :closed
+    end
+  end
+
+  defp discard_inactive(table, subscription, key) do
+    :ets.delete(table, key)
+    :ets.delete(table, {:buffered, subscription})
+    false
+  end
+
+  defp release_buffered(table, subscription) do
+    :ets.update_counter(table, {:buffered, subscription}, {2, -1, 0, 0})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   defp server(options), do: Keyword.get(options, :server)

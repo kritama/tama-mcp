@@ -101,6 +101,30 @@ defmodule TamaMCP.Notification.LocalTest do
     assert :empty = Local.take(subscription, options)
   end
 
+  test "bounds retained ingress by subscription capacity across distinct task IDs", %{
+    notification: notification,
+    options: options
+  } do
+    tasks = Enum.map(1..100, &task("task-#{&1}", 0))
+    task_ids = Enum.map(tasks, & &1.id)
+
+    assert {:ok, subscription} = Local.subscribe(task_ids, self(), 1, options)
+    :ok = :sys.suspend(notification)
+
+    try do
+      Enum.each(tasks, &assert(:ok = Local.publish(&1, options)))
+
+      assert retained_snapshots(notification) <= 1
+      assert {:message_queue_len, length} = Process.info(notification, :message_queue_len)
+      assert length <= 1
+    after
+      :ok = :sys.resume(notification)
+    end
+
+    assert_receive {Notification, ^subscription, :overflow}
+    assert {:error, :overflow} = Local.take(subscription, options)
+  end
+
   test "unsubscribe is idempotent and dead subscribers are removed", %{options: options} do
     task = task("task-1", 0)
 
@@ -179,6 +203,18 @@ defmodule TamaMCP.Notification.LocalTest do
       })
 
     task
+  end
+
+  defp retained_snapshots(notification) do
+    {:dictionary, dictionary} = Process.info(notification, :dictionary)
+    {{Local, :ingress}, ingress} = List.keyfind(dictionary, {Local, :ingress}, 0)
+
+    ingress
+    |> :ets.tab2list()
+    |> Enum.count(fn
+      {key, %Task{}} when is_tuple(key) -> elem(key, 0) == :task
+      _entry -> false
+    end)
   end
 
   defp eventually(fun, attempts \\ 20)
