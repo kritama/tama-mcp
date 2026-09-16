@@ -156,6 +156,37 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.MismatchedOwnerStor
   def cancel(owner_key, task_id, options), do: Store.cancel(owner_key, task_id, options)
 end
 
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.BlockingCache do
+  @moduledoc false
+
+  @behaviour TamaMCP.Cache
+
+  @impl true
+  def fetch(key, loader, options) do
+    gate = Keyword.fetch!(options, :gate)
+
+    block? =
+      String.contains?(key, ":task_status_notification_params:") and
+        Agent.get_and_update(gate, fn
+          :block_once -> {true, :pass}
+          state -> {false, state}
+        end)
+
+    if block? do
+      reference = make_ref()
+      send(Keyword.fetch!(options, :test), {:notification_validation_blocked, self(), reference})
+
+      receive do
+        {:continue_notification_validation, ^reference} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+
+    {:ok, loader.()}
+  end
+end
+
 defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.FirstChunkClosedAdapter do
   @moduledoc false
 
@@ -445,6 +476,81 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
 
     wait_until_expired(expires_at)
     send(stream_pid, {:continue_task_get, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert [acknowledgement, closing] = data_events(conn)
+    assert acknowledgement["method"] == Protocol.notification(:subscriptions_acknowledged)
+    assert closing["result"]["resultType"] == "complete"
+  end
+
+  test "delivery rechecks a queued invalidation after durable task lookups", %{
+    store: store,
+    notification: notification,
+    authorization: authorization,
+    task: task
+  } do
+    {:ok, gate} = Agent.start_link(fn -> {:pass_then_block, 2} end)
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        task_store: __MODULE__.BlockingStore,
+        task_store_options: [agent: store, gate: gate, test: self()],
+        limits: [
+          stream_keepalive_interval_ms: 1_000,
+          stream_authorization_recheck_ms: 1_000,
+          stream_max_lifetime_ms: 1_000
+        ]
+      )
+
+    stream = start_stream(runtime, [task.id])
+    assert_receive {:invalidation_registered, stream_pid, invalidation}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+
+    assert :ok = Local.publish(task, server: notification)
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert_receive {:task_get_blocked, ^stream_pid, reference}, 1_000
+
+    Agent.update(authorization, &%{&1 | mode: :deny})
+    send(stream_pid, Authorization.invalidation(invalidation))
+    send(stream_pid, {:continue_task_get, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert [acknowledgement, closing] = data_events(conn)
+    assert acknowledgement["method"] == Protocol.notification(:subscriptions_acknowledged)
+    assert closing["result"]["resultType"] == "complete"
+  end
+
+  test "delivery rechecks credential expiry after notification serialization", %{
+    store: store,
+    notification: notification,
+    authorization: authorization,
+    task: task
+  } do
+    {:ok, gate} = Agent.start_link(fn -> :block_once end)
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        cache: __MODULE__.BlockingCache,
+        cache_options: [gate: gate, test: self()],
+        limits: [
+          stream_keepalive_interval_ms: 1_000,
+          stream_authorization_recheck_ms: 1_000,
+          stream_max_lifetime_ms: 500
+        ]
+      )
+
+    stream = start_stream(runtime, [task.id])
+    assert_receive {:invalidation_registered, stream_pid, _reference}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+
+    expires_at = DateTime.add(DateTime.utc_now(), 50, :millisecond)
+    Agent.update(authorization, &%{&1 | expires_at: expires_at})
+    assert :ok = Local.publish(task, server: notification)
+
+    assert_receive {:notification_validation_blocked, ^stream_pid, reference}, 1_000
+    wait_until_expired(expires_at)
+    send(stream_pid, {:continue_notification_validation, reference})
 
     conn = Elixir.Task.await(stream, 1_000)
     assert [acknowledgement, closing] = data_events(conn)
@@ -752,8 +858,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     send(stream_pid, {:continue_invalidation_registration, reference})
 
     conn = Elixir.Task.await(stream, 1_000)
-    assert conn.status == 400
+    assert conn.status == 401
     assert Jason.decode!(conn.resp_body)["error"]["message"] == "credential rejected"
+
+    assert Plug.Conn.get_resp_header(conn, "www-authenticate") == [
+             ~s(Bearer error="invalid_token")
+           ]
+
     assert_receive {:invalidation_unregistered, ^reference}, 1_000
   end
 
@@ -813,12 +924,15 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     notification_options = Keyword.get(options, :notification_options, server: notification)
     task_store = Keyword.get(options, :task_store, Store)
     task_store_options = Keyword.get(options, :task_store_options, agent: store)
+    cache = Keyword.get(options, :cache, TamaMCP.TestSupport.Cache)
+    cache_options = Keyword.get(options, :cache_options, [])
 
     runtime_options = [
       server: TamaMCP.TestSupport.TaskRequiredServer,
       authorization: __MODULE__.Authorization,
       authorization_options: [agent: authorization, test: test],
-      cache: TamaMCP.TestSupport.Cache,
+      cache: cache,
+      cache_options: cache_options,
       task_store: task_store,
       task_store_options: task_store_options,
       task_runner: TamaMCP.TestSupport.Tasks.Runner,

@@ -351,13 +351,21 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     with {:ok, state, tasks} <- reauthorize(state),
          {:ok, task} <- Map.fetch(tasks, task_id),
          {:ok, notification} <- task_notification(task, state.request.request_id, state.runtime),
-         :ok <- validate_maximum_lifetime(state),
+         :ok <- validate_delivery_boundaries(state),
          {:ok, conn} <- chunk_event(state.conn, notification) do
       loop(%{state | conn: conn})
     else
-      {:error, :maximum_lifetime} -> graceful_close(state, :maximum_lifetime)
-      {:error, reason} -> delivery_failure(state, close_reason(reason))
-      :error -> delivery_failure(state, :task_not_authorized)
+      {:reauthorize, :authorization_invalidated} ->
+        deliver_authorized_task(state, task_id)
+
+      {:error, reason} when reason in [:maximum_lifetime, :credential_expired] ->
+        graceful_close(state, reason)
+
+      {:error, reason} ->
+        delivery_failure(state, close_reason(reason))
+
+      :error ->
+        delivery_failure(state, :task_not_authorized)
     end
   end
 
@@ -370,11 +378,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
 
   defp reauthorize_before_open(conn, previous, task_ids, runtime) do
     with {:ok, %Decision{} = decision} <-
-           authorization(runtime, :reauthorize, [
-             conn,
-             previous,
-             runtime.authorization_options
-           ]),
+           reauthorize_credential(conn, previous, runtime),
          true <- Decision.valid?(decision),
          true <- decision.owner_key === previous.owner_key,
          :ok <- validate_credential(decision),
@@ -393,6 +397,17 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
 
       _denied ->
         {:error, :authorization_rejected}
+    end
+  end
+
+  defp reauthorize_credential(conn, previous, runtime) do
+    case authorization(runtime, :reauthorize, [
+           conn,
+           previous,
+           runtime.authorization_options
+         ]) do
+      {:error, %Error{} = error} -> {:error, error, 401, :credential}
+      result -> result
     end
   end
 
@@ -591,10 +606,40 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     _kind, _reason -> {:error, :closed}
   end
 
-  defp validate_maximum_lifetime(state) do
-    if now_ms() < state.maximum_deadline,
-      do: :ok,
-      else: {:error, :maximum_lifetime}
+  defp validate_delivery_boundaries(state) do
+    case take_pending_invalidation(state.invalidation) do
+      :clear ->
+        validate_delivery_deadlines(state)
+
+      :invalidated ->
+        with :ok <- validate_delivery_deadlines(state),
+             do: {:reauthorize, :authorization_invalidated}
+    end
+  end
+
+  defp validate_delivery_deadlines(state) do
+    now = now_ms()
+
+    cond do
+      now >= state.maximum_deadline ->
+        {:error, :maximum_lifetime}
+
+      not is_nil(state.expiry_deadline) and now >= state.expiry_deadline ->
+        {:error, :credential_expired}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp take_pending_invalidation(nil), do: :clear
+
+  defp take_pending_invalidation(invalidation) do
+    receive do
+      {Authorization, ^invalidation, :invalidated} -> :invalidated
+    after
+      0 -> :clear
+    end
   end
 
   defp due(state) do
