@@ -98,11 +98,12 @@ defmodule TamaMCP.TestSupport.Subscriptions.Fixtures do
     id = "listen-stale-policy"
     task = task("subscription-stale", :working)
 
+    subscription_request =
+      request(id, [task["taskId"]], setup: %{"tasks" => [task], "close" => "policy_invalidation"})
+
     stream_fixture(
       "subscriptions/listen stale policy closes stream",
-      request(id, [task["taskId"]],
-        setup: %{"tasks" => [task], "close" => "policy_invalidation"}
-      ),
+      subscription_request,
       [acknowledgement(id, [task["taskId"]]), closing(id)]
     )
   end

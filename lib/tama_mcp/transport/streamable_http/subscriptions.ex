@@ -445,7 +445,10 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
       }
     }
 
-    with :ok <- validate(ProtocolSchema, :subscriptions_acknowledged_notification, value, runtime),
+    acknowledgement_validation =
+      validate(ProtocolSchema, :subscriptions_acknowledged_notification, value, runtime)
+
+    with :ok <- acknowledgement_validation,
          :ok <-
            validate(
              TaskSchema,
