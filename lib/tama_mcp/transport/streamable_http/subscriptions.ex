@@ -110,7 +110,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
       acknowledgement(request.request_id, request.params["notifications"], task_ids, runtime)
 
     with {:ok, acknowledgement} <- acknowledgement_result,
-         {:ok, decision} <- reauthorize_before_open(conn, decision, task_ids, runtime) do
+         {:ok, decision} <-
+           reauthorize_before_open(conn, decision, task_ids, invalidation, runtime) do
       case open(conn, acknowledgement) do
         {:ok, conn} ->
           state =
@@ -376,7 +377,20 @@ defmodule TamaMCP.Transport.StreamableHTTP.Subscriptions do
     end
   end
 
-  defp reauthorize_before_open(conn, previous, task_ids, runtime) do
+  defp reauthorize_before_open(conn, previous, task_ids, invalidation, runtime) do
+    case reauthorize_visible_before_open(conn, previous, task_ids, runtime) do
+      {:ok, decision} ->
+        case take_pending_invalidation(invalidation) do
+          :clear -> {:ok, decision}
+          :invalidated -> reauthorize_before_open(conn, decision, task_ids, invalidation, runtime)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp reauthorize_visible_before_open(conn, previous, task_ids, runtime) do
     with {:ok, %Decision{} = decision} <-
            reauthorize_credential(conn, previous, runtime),
          true <- Decision.valid?(decision),

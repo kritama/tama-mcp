@@ -77,6 +77,26 @@ defmodule TamaMCP.ConformanceTest do
     def publish(_task, _options), do: :ok
   end
 
+  defmodule ObservedChunkAdapter do
+    @moduledoc false
+
+    alias Plug.Adapters.Test.Conn
+
+    def read_req_body(payload, options), do: Conn.read_req_body(payload, options)
+
+    def send_resp(payload, status, headers, body),
+      do: Conn.send_resp(payload, status, headers, body)
+
+    def send_chunked(payload, status, headers),
+      do: Conn.send_chunked(payload, status, headers)
+
+    def chunk(%{owner: owner} = payload, body) do
+      result = Conn.chunk(payload, body)
+      send(owner, {:conformance_chunked, self()})
+      result
+    end
+  end
+
   test "protocol validators are restored through the host cache adapter" do
     fixture = hd(Conformance.fixtures())
 
@@ -431,7 +451,7 @@ defmodule TamaMCP.ConformanceTest do
 
     tasks = prepare_subscription_tasks(setup["tasks"] || [], runtime)
     reconcile_subscription(setup["reconcile"], tasks, runtime)
-    conn = subscription_conn(request)
+    conn = subscription_conn(request, setup)
 
     if setup == %{} or setup["authorization"] == "expired" do
       conn |> MCPPlug.call(runtime) |> normalize_response()
@@ -521,6 +541,7 @@ defmodule TamaMCP.ConformanceTest do
                  Local.publish(Map.fetch!(tasks, task_id), server: notification)
 
       %{"close" => "policy_invalidation"} ->
+        assert_receive {:conformance_chunked, ^stream_pid}, 1_000
         Agent.update(authorization, &%{&1 | mode: :deny})
         send(stream_pid, Authorization.invalidation(invalidation))
 
@@ -532,10 +553,18 @@ defmodule TamaMCP.ConformanceTest do
     end
   end
 
-  defp subscription_conn(request) do
-    :post
-    |> Plug.Test.conn("/", Jason.encode!(request["body"]))
-    |> Map.put(:req_headers, Enum.map(request["headers"], &List.to_tuple/1))
+  defp subscription_conn(request, setup) do
+    conn =
+      :post
+      |> Plug.Test.conn("/", Jason.encode!(request["body"]))
+      |> Map.put(:req_headers, Enum.map(request["headers"], &List.to_tuple/1))
+
+    if setup["close"] == "policy_invalidation" do
+      {_adapter, payload} = conn.adapter
+      %{conn | adapter: {ObservedChunkAdapter, payload}}
+    else
+      conn
+    end
   end
 
   defp normalize_response(%Plug.Conn{state: :chunked} = conn) do

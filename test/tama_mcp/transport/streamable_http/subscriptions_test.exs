@@ -203,6 +203,26 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.FirstChunkClosedAda
   def chunk(_payload, _body), do: {:error, :closed}
 end
 
+defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.ObservedChunkAdapter do
+  @moduledoc false
+
+  alias Plug.Adapters.Test.Conn
+
+  def read_req_body(payload, options), do: Conn.read_req_body(payload, options)
+
+  def send_resp(payload, status, headers, body),
+    do: Conn.send_resp(payload, status, headers, body)
+
+  def send_chunked(payload, status, headers),
+    do: Conn.send_chunked(payload, status, headers)
+
+  def chunk(%{owner: owner} = payload, body) do
+    result = Conn.chunk(payload, body)
+    send(owner, {:response_chunked, self()})
+    result
+  end
+end
+
 defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest.QueuedOverflowNotification do
   @moduledoc false
 
@@ -408,9 +428,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
     authorization: authorization,
     task: task
   } do
-    stream = start_stream(runtime, [task.id])
+    conn = request(runtime, [task.id], [])
+    {_adapter, payload} = conn.adapter
+    conn = %{conn | adapter: {__MODULE__.ObservedChunkAdapter, payload}}
+    stream = Elixir.Task.async(fn -> MCPPlug.call(conn, runtime) end)
     assert_receive {:invalidation_registered, stream_pid, reference}, 1_000
     assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert_receive {:response_chunked, ^stream_pid}, 1_000
 
     Agent.update(authorization, &%{&1 | mode: :deny})
     send(stream_pid, Authorization.invalidation(reference))
@@ -866,6 +890,39 @@ defmodule TamaMCP.Transport.StreamableHTTP.SubscriptionsTest do
            ]
 
     assert_receive {:invalidation_unregistered, ^reference}, 1_000
+  end
+
+  test "rechecks a queued invalidation before acknowledging the stream", %{
+    store: store,
+    notification: notification,
+    authorization: authorization,
+    task: task
+  } do
+    {:ok, gate} = Agent.start_link(fn -> {:pass_then_block, 1} end)
+
+    runtime =
+      runtime(store, notification, authorization, self(),
+        task_store: __MODULE__.BlockingStore,
+        task_store_options: [agent: store, gate: gate, test: self()]
+      )
+
+    stream = start_stream(runtime, [task.id])
+    assert_receive {:invalidation_registered, stream_pid, invalidation}, 1_000
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert_receive {:task_get_blocked, ^stream_pid, reference}, 1_000
+
+    Agent.update(authorization, &%{&1 | mode: :deny})
+    send(stream_pid, Authorization.invalidation(invalidation))
+    send(stream_pid, {:continue_task_get, reference})
+
+    conn = Elixir.Task.await(stream, 1_000)
+    assert_receive {:reauthorized, ^stream_pid, "test-owner"}, 1_000
+    assert conn.status == 401
+    assert data_events(conn) == []
+
+    assert Plug.Conn.get_resp_header(conn, "www-authenticate") == [
+             ~s(Bearer error="invalid_token")
+           ]
   end
 
   test "returns the committed connection when the acknowledgement chunk fails", %{
