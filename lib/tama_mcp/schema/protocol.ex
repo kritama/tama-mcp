@@ -16,7 +16,11 @@ defmodule TamaMCP.Schema.Protocol do
     list_tools_request: "ListToolsRequest",
     list_tools_result: "ListToolsResult",
     list_tools_response: "ListToolsResultResponse",
-    result_response: "JSONRPCResultResponse"
+    result_response: "JSONRPCResultResponse",
+    subscriptions_acknowledged_notification: "SubscriptionsAcknowledgedNotification",
+    subscriptions_listen_request: "SubscriptionsListenRequest",
+    subscriptions_listen_result: "SubscriptionsListenResult",
+    subscriptions_listen_response: "SubscriptionsListenResultResponse"
   }
 
   @schema_file Path.expand("../../../priv/#{@schema_path}", __DIR__)
@@ -48,6 +52,10 @@ defmodule TamaMCP.Schema.Protocol do
           | :list_tools_result
           | :list_tools_response
           | :result_response
+          | :subscriptions_acknowledged_notification
+          | :subscriptions_listen_request
+          | :subscriptions_listen_result
+          | :subscriptions_listen_response
 
   @spec validate(kind(), term(), module(), keyword()) :: :ok | {:error, [String.t()]}
   def validate(kind, value, cache, cache_options \\ []) when is_map_key(@definitions, kind) do

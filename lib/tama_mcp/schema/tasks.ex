@@ -18,6 +18,10 @@ defmodule TamaMCP.Schema.Tasks do
     get_task_result: "GetTaskResult",
     input_requests: "InputRequests",
     input_required_task: "InputRequiredTask",
+    task_status_notification: "TaskStatusNotification",
+    task_status_notification_params: "TaskStatusNotificationParams",
+    task_subscription_acknowledged_notifications: "TaskSubscriptionAcknowledgedNotifications",
+    task_subscription_notifications: "TaskSubscriptionNotifications",
     update_task_request: "UpdateTaskRequest",
     update_task_result: "UpdateTaskResult",
     working_task: "WorkingTask"
@@ -53,6 +57,10 @@ defmodule TamaMCP.Schema.Tasks do
           | :get_task_result
           | :input_requests
           | :input_required_task
+          | :task_status_notification
+          | :task_status_notification_params
+          | :task_subscription_acknowledged_notifications
+          | :task_subscription_notifications
           | :update_task_request
           | :update_task_result
           | :working_task

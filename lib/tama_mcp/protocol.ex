@@ -26,6 +26,11 @@ defmodule TamaMCP.Protocol do
     subscriptions_listen: "subscriptions/listen"
   }
 
+  @notifications %{
+    subscriptions_acknowledged: "notifications/subscriptions/acknowledged",
+    tasks: "notifications/tasks"
+  }
+
   @name_sources [
     tools_call: "name",
     resources_read: "uri",
@@ -97,6 +102,10 @@ defmodule TamaMCP.Protocol do
   @doc "Returns the set of known protocol method atoms and their names."
   @spec methods() :: %{atom() => String.t()}
   def methods, do: @methods
+
+  @doc "Returns the JSON-RPC method name for a known server notification atom."
+  @spec notification(atom()) :: String.t()
+  def notification(name) when is_atom(name), do: Map.fetch!(@notifications, name)
 
   @doc """
   Returns the set of method atoms that require the `Mcp-Name` header.

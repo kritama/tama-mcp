@@ -293,11 +293,24 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       end
     end
 
-    test "continues to reject Phase 3 notification options" do
-      for option <- [:notification_bus, :notification_bus_options] do
-        assert_raise ArgumentError, ~r/unknown option/, fn ->
-          Runtime.build(@valid ++ [{option, TamaMCP.TestSupport.Authorization}])
-        end
+    test "validates Phase 3 notification configuration as a complete task extension" do
+      assert_raise ArgumentError, ~r/notification requires task_store and task_runner/, fn ->
+        Runtime.build(@valid ++ [notification: TamaMCP.Notification.Local])
+      end
+
+      assert_raise ArgumentError, ~r/notification_options requires notification/, fn ->
+        Runtime.build(@valid ++ [notification_options: [server: self()]])
+      end
+
+      assert_raise ArgumentError, ~r/does not implement TamaMCP.Notification/, fn ->
+        Runtime.build(
+          @valid ++
+            [
+              task_store: TamaMCP.TestSupport.Tasks.Store,
+              task_runner: TamaMCP.TestSupport.Tasks.Runner,
+              notification: @plain
+            ]
+        )
       end
     end
 
@@ -308,6 +321,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
       assert runtime.limits.max_task_ttl_ms == 604_800_000
       assert runtime.limits.default_poll_interval_ms == 1_000
       assert runtime.limits.max_input_request_keys_per_task == 256
+      assert runtime.limits.max_task_ids_per_subscription == 100
+      assert runtime.limits.notification_buffer_capacity == 100
+      assert runtime.limits.stream_keepalive_interval_ms == 15_000
+      assert runtime.limits.stream_authorization_recheck_ms == 60_000
+      assert runtime.limits.stream_max_lifetime_ms == 3_600_000
       assert runtime.limits.max_status_message_bytes == 2_048
 
       assert_raise ArgumentError, ~r/cannot exceed/, fn ->
@@ -375,6 +393,22 @@ defmodule TamaMCP.Transport.StreamableHTTP.RuntimeTest do
                Result.discover(runtime.server, true)["capabilities"]
 
       assert extensions[TamaMCP.tasks_extension()] == %{}
+    end
+
+    test "accepts a notification adapter on a complete task runtime" do
+      runtime =
+        Runtime.build(
+          server: TamaMCP.TestSupport.TaskRequiredServer,
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache,
+          task_store: TamaMCP.TestSupport.Tasks.Store,
+          task_runner: TamaMCP.TestSupport.Tasks.Runner,
+          notification: TamaMCP.Notification.Local,
+          notification_options: [server: self()]
+        )
+
+      assert Runtime.notification_capable?(runtime)
+      assert runtime.notification_options == [server: self()]
     end
   end
 end

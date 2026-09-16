@@ -128,7 +128,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
   end
 
   defp validate_task(task, owner_key, identifier, runtime) do
-    if task.owner_key == owner_key and task.id == identifier do
+    if task.owner_key === owner_key and task.id === identifier do
       Task.validate(task, Runtime.task_validation_options(runtime))
     else
       {:error, :not_found}

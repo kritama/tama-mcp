@@ -3,8 +3,8 @@ defmodule TamaMCP.Authorization do
   The authorization boundary for every HTTP request.
 
   TamaMCP composes an authorization adapter (typically built on `tama_oauth`)
-  rather than reimplementing OAuth. The adapter is invoked exactly once per
-  request, before transport validation and dispatch. It returns a normalized
+  rather than reimplementing OAuth. The adapter is invoked for every request
+  before transport validation and dispatch. It returns a normalized
   decision or a bounded authorization error. TamaMCP derives identity only from
   the adapter result; it never accepts identity from an unvalidated request
   field.
@@ -12,6 +12,14 @@ defmodule TamaMCP.Authorization do
   Adapters that return `{:error, error}` cause the transport to answer with
   HTTP `401 Unauthorized` and the adapter's error. Scope enforcement happens
   after the decision, per tool, and fails with HTTP `403 Forbidden`.
+
+  A long-lived subscription calls `reauthorize/3` before each task delivery and
+  at the configured idle interval. The default implementation authenticates
+  the retained request again. `register_invalidation/3` may additionally
+  register the stream process for immediate policy or credential invalidation;
+  the adapter sends `invalidation/1` using its returned reference. The default
+  reports that immediate invalidation is unsupported, leaving expiry and
+  periodic reauthorization active.
   """
 
   alias TamaMCP.Authorization.{Challenge, Decision}
@@ -21,10 +29,36 @@ defmodule TamaMCP.Authorization do
   @callback authenticate(Plug.Conn.t(), keyword()) ::
               {:ok, decision()} | {:error, TamaMCP.Error.t()}
 
+  @callback reauthorize(Plug.Conn.t(), decision(), keyword()) ::
+              {:ok, decision()} | {:error, TamaMCP.Error.t()}
+
+  @callback register_invalidation(decision(), pid(), keyword()) ::
+              {:ok, term()} | :unsupported | {:error, TamaMCP.Error.t()}
+
+  @callback unregister_invalidation(term(), keyword()) ::
+              :ok | {:error, TamaMCP.Error.t()}
+
+  @optional_callbacks reauthorize: 3, register_invalidation: 3, unregister_invalidation: 2
+
+  @doc "Builds the standard message an adapter sends when stream policy may have changed."
+  @spec invalidation(term()) :: {module(), term(), :invalidated}
+  def invalidation(reference), do: {__MODULE__, reference, :invalidated}
+
   @doc false
   defmacro __using__(_opts) do
     quote do
       @behaviour TamaMCP.Authorization
+
+      @impl true
+      def reauthorize(conn, _decision, options), do: authenticate(conn, options)
+
+      @impl true
+      def register_invalidation(_decision, _subscriber, _options), do: :unsupported
+
+      @impl true
+      def unregister_invalidation(_reference, _options), do: :ok
+
+      defoverridable reauthorize: 3, register_invalidation: 3, unregister_invalidation: 2
     end
   end
 

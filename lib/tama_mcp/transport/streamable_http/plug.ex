@@ -2,8 +2,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Plug do
   @moduledoc """
   Stateless Streamable HTTP endpoint for MCP `2026-07-28`.
 
-  The endpoint authenticates every independent request and supports
-  `server/discover`, `tools/list`, and synchronous `tools/call`.
+  The endpoint authenticates every independent request and supports discovery,
+  tools, durable task methods, and long-lived `subscriptions/listen` SSE
+  responses for authorized task notifications.
   """
 
   import Plug.Conn

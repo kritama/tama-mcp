@@ -3,7 +3,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
 
   alias TamaMCP.{Error, Protocol}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
-  alias TamaMCP.Transport.StreamableHTTP.{Execute, Result, Runtime, Tasks, Wire}
+  alias TamaMCP.Transport.StreamableHTTP.{Execute, Result, Runtime, Subscriptions, Tasks, Wire}
 
   def call(conn, request, decision, runtime, base) do
     discover = Protocol.method(:server_discover)
@@ -12,6 +12,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
     get_task = Protocol.method(:tasks_get)
     update_task = Protocol.method(:tasks_update)
     cancel_task = Protocol.method(:tasks_cancel)
+    listen = Protocol.method(:subscriptions_listen)
 
     case request.method do
       ^discover ->
@@ -31,6 +32,9 @@ defmodule TamaMCP.Transport.StreamableHTTP.Dispatch do
 
       ^cancel_task ->
         Tasks.call(conn, request, decision, runtime, base)
+
+      ^listen ->
+        Subscriptions.call(conn, request, decision, runtime, base)
 
       method ->
         Wire.error(

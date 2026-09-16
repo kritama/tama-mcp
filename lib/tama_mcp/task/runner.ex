@@ -13,7 +13,9 @@ defmodule TamaMCP.Task.Runner do
   The generated task fields include the originating request's client
   capabilities, which must be persisted unchanged for later input-request
   checks. The validation options retain the originating tool for output-schema
-  checks.
+  checks. The namespace also carries the optional notification adapter and its
+  options so the runner can publish each snapshot only after its durable state
+  transition commits.
   """
 
   @callback start(

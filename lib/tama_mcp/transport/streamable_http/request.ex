@@ -6,10 +6,13 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
   alias TamaMCP.Schema.Tasks, as: TaskSchema
   alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters, Runtime}
 
+  @subscriptions_listen Protocol.method(:subscriptions_listen)
+
   @core_request_schemas %{
     Protocol.method(:server_discover) => :discover_request,
     Protocol.method(:tools_list) => :list_tools_request,
-    Protocol.method(:tools_call) => :call_tool_request
+    Protocol.method(:tools_call) => :call_tool_request,
+    Protocol.method(:subscriptions_listen) => :subscriptions_listen_request
   }
   @task_request_schemas %{
     Protocol.method(:tasks_get) => :get_task_request,
@@ -208,7 +211,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
       {schema, kind} ->
         case schema.validate(kind, json, runtime.cache, runtime.cache_options) do
           :ok ->
-            :ok
+            validate_task_subscription(json, method, runtime)
 
           {:error, details} ->
             message = details |> Enum.take(3) |> Enum.join("; ")
@@ -218,6 +221,31 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
                "Request does not match the protocol schema: #{message}"
              )}
         end
+    end
+  end
+
+  defp validate_task_subscription(json, @subscriptions_listen, runtime) do
+    notifications = get_in(json, ["params", "notifications"])
+
+    if is_map(notifications) and Map.has_key?(notifications, "taskIds") do
+      validate_with(TaskSchema, :task_subscription_notifications, notifications, runtime)
+    else
+      :ok
+    end
+  end
+
+  defp validate_task_subscription(_json, _method, _runtime), do: :ok
+
+  defp validate_with(schema, kind, value, runtime) do
+    case schema.validate(kind, value, runtime.cache, runtime.cache_options) do
+      :ok ->
+        :ok
+
+      {:error, details} ->
+        message = details |> Enum.take(3) |> Enum.join("; ")
+
+        {:error,
+         TamaMCP.Error.invalid_params("Request does not match the protocol schema: #{message}")}
     end
   end
 

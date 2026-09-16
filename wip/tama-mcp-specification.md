@@ -1,6 +1,6 @@
 # TamaMCP 2026 Server Runtime Specification
 
-Status: Phases 0-2 implemented and verified; Phase 3 ready to begin; Phases 3-5
+Status: Phases 0-3 implemented and verified; Phase 4 ready to begin; Phases 4-5
 not yet implemented
 
 This document is the authoritative design contract for the first complete
@@ -161,7 +161,7 @@ TamaMCP.Clock
 TamaMCP.Context
 TamaMCP.Error
 TamaMCP.Identifier
-TamaMCP.NotificationBus
+TamaMCP.Notification
 TamaMCP.Protocol
 TamaMCP.Response
 TamaMCP.Server
@@ -796,10 +796,10 @@ only for graceful closure; an abrupt transport close has no final response.
 - the Tasks extension when both a task store and task runner are configured.
 
 Capabilities must describe the configured server truthfully. Task polling may
-be advertised without a notification bus because task notifications are
-optional in the extension. Without a notification bus, a task-ID
+be advertised without a notification adapter because task notifications are
+optional in the extension. Without a notification adapter, a task-ID
 `subscriptions/listen` request acknowledges no task IDs. With a notification
-bus, it acknowledges only IDs that pass the authorization checks in section 14.
+adapter, it acknowledges only IDs that pass the authorization checks in section 14.
 
 Discovery output must be deterministic and suitable for protocol conformance
 fixtures.
@@ -1042,9 +1042,9 @@ the task `statusMessage`. Richer structured progress, if required, must use a
 reviewed Tama-namespaced `_meta` field or a separately specified application
 contract; it must not masquerade as a standard MCP field.
 
-### 14.1 Notification bus behaviour
+### 14.1 Notification behaviour
 
-`TamaMCP.NotificationBus` decouples task commits from active subscription
+`TamaMCP.Notification` decouples task commits from active subscription
 streams. It must support:
 
 - subscribing a process to an authorized set of task IDs;
@@ -1059,6 +1059,12 @@ cluster-aware Phoenix PubSub adapter. TamaMCP itself must not depend on Phoenix.
 Slow or disconnected subscribers must not block task transitions or exhaust an
 unbounded mailbox. The stream applies bounded buffering and closes lagging
 subscribers so they can recover through `tasks/get`.
+
+The process-local reference adapter coalesces pending ingress by subscribed
+task ID outside the adapter process mailbox and sends at most one wake-up while
+ingress is pending. Its ingress is therefore bounded by the active subscription
+index. Coalescing is safe because every delivery re-fetches the current task
+from durable storage and notifications have no replay guarantee.
 
 ## 15. Authorization and TamaOAuth
 
@@ -1122,7 +1128,7 @@ Server configuration is explicit and validated once. It includes:
 - validator cache adapter and options;
 - task store and options;
 - task runner and options;
-- notification bus and options;
+- notification adapter and options;
 - clock and identifier adapters; and
 - telemetry prefix and safe metadata callback.
 
@@ -1243,6 +1249,13 @@ payload for all five task states, reject cross-state `inputRequests`, `result`,
 and `error` payloads, and reject an unsafe integer TTL. The checked fixture file
 must match its deterministic test builder.
 
+The Phase 3 subscription fixture document contains seven deterministic HTTP/SSE
+fixtures covering acknowledged delivery, owner-authorized filtering, reconnect
+reconciliation, capability denial, expired credentials, policy invalidation,
+and overflow closure. Each successful stream fixture compares ordered decoded
+events and validates the acknowledgement, task notification, and graceful
+closing response against the pinned core and Tasks schemas.
+
 The examples in section 10 are the human-readable form of this fixture
 contract. If a checked fixture changes, the example must change in the same
 commit.
@@ -1315,7 +1328,7 @@ remain application-owned work after the reusable package phases are complete.
 
 ### Phase 3: subscriptions and task notifications
 
-- notification-bus behaviour;
+- notification behaviour;
 - process-local reference notification adapter for package tests;
 - `subscriptions/listen` stream and acknowledgement;
 - authorized `notifications/tasks` delivery;
@@ -1330,6 +1343,35 @@ message, or overflow path must preserve recovery through `tasks/get`. The
 package phase is complete when the notification behaviour, reference adapter,
 stream transport, authorization rechecks, bounded buffering, and conformance
 fixtures pass the same package gates used for Phase 2.
+
+Phase 3 implements the adapter-neutral notification contract, bounded
+process-local adapter, schema-validated acknowledgement-first SSE stream,
+owner-authorized task filtering, and complete task snapshots re-fetched from
+the durable store at delivery time. Streams enforce credential expiry, maximum
+lifetime, periodic and delivery-time reauthorization, optional immediate
+invalidation, keepalives, bounded overflow, and idempotent cleanup. Committed
+task transitions have an explicit best-effort publication helper whose failure
+cannot reinterpret or roll back durable state.
+
+Phase 3 completion is established by:
+
+- owner-bound acknowledgement subsets with unauthorized and missing task IDs
+  remaining externally indistinguishable;
+- acknowledgement-first ordering and one subscription identifier shared by
+  every later notification and graceful closing response;
+- durable-store reconciliation before every delivery, including a regression
+  proving a stale notification snapshot cannot replace newer committed state;
+- expiry, periodic recheck, delivery-time denial, immediate policy
+  invalidation, reconnect, overflow, adapter-failure, and cleanup coverage;
+- bounded process-local queues with coalesced wakeups and idempotent subscriber
+  teardown;
+- seven deterministic subscription fixtures validated against the pinned core
+  and Tasks schemas; and
+- successful package precommit, Dialyzer, documentation, and Hex build gates.
+
+Phase 3 does not include Tama Ecto persistence, durable worker integration, a
+cluster-aware Phoenix PubSub adapter, Tama endpoint migration, Tama Link live
+acceptance, or dependency removal. Those remain Phase 4 and Phase 5 work.
 
 ### Phase 4: Tama integration
 
