@@ -883,8 +883,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
         {"tasks/cancel", %{"taskId" => "t-1"}, [{"mcp-name", "t-1"}]},
         {Protocol.method(:resources_read), %{"uri" => "tama://resource/1"},
          [{"mcp-name", "tama://resource/1"}]},
-        {Protocol.method(:prompts_get), %{"name" => "summarize"}, [{"mcp-name", "summarize"}]},
-        {"subscriptions/listen", %{}, []}
+        {Protocol.method(:prompts_get), %{"name" => "summarize"}, [{"mcp-name", "summarize"}]}
       ]
 
       for {method, params, headers} <- requests do

@@ -11,9 +11,10 @@ Streamable HTTP transport, per-request authorization, discovery, deterministic
 tool listing, synchronous tool execution, schema validation, bounded telemetry,
 and reusable protocol conformance helpers. Phase 2 adds durable task contracts,
 server-directed task creation, task polling and mutation methods, and the full
-package conformance matrix. Tama's application-owned persistence and runner
-adapters remain a separate integration phase. Subscriptions and task
-notifications remain a later phase.
+task conformance matrix. Phase 3 adds bounded subscription streams, authorized
+task notifications, stream reauthorization, and a process-local reference
+notification adapter. Tama's application-owned persistence, runner, and
+clustered notification adapters remain a separate integration phase.
 
 ## Boundary
 
@@ -35,8 +36,8 @@ Codex / OpenCode / Pi
 
 - `TamaMCP` owns MCP JSON-RPC validation, the server/tool DSL, stateless HTTP,
   protocol responses, task values and transitions, durable task adapter
-  contracts, cache keys and compiled validator artifacts, and the future
-  subscription adapter contract.
+  contracts, cache keys and compiled validator artifacts, subscription streams,
+  and the notification adapter contract.
 - `TamaOAuth` owns reusable OAuth and protected-resource protocol mechanics.
 - Tama owns identities, authorization policy, rate limits, the validator cache
   engine, Ecto persistence, durable execution, task transitions, and graph
@@ -53,22 +54,24 @@ The implemented package supports:
 
 - MCP protocol version `2026-07-28` only;
 - server-side stateless Streamable HTTP;
-- `server/discover`, `tools/list`, `tools/call`, `tasks/get`, `tasks/update`, and
-  `tasks/cancel`;
+- `server/discover`, `tools/list`, `tools/call`, `tasks/get`, `tasks/update`,
+  `tasks/cancel`, and `subscriptions/listen`;
 - authorization-aware tool visibility and scope enforcement;
 - application-supplied authorization decisions and safe context values;
 - server-directed durable execution for task-required tools and explicit
   application selection for task-optional tools;
 - owner-bound task lookup, input-response submission, and cooperative
   cancellation through application adapters;
-- bounded request execution, successful results, errors, headers, and telemetry; and
+- bounded request execution, successful results, errors, headers, subscription
+  buffers, and telemetry; and
 - reusable conformance validation against the vendored core and Tasks schemas.
 
 It does not provide an MCP client, STDIO transport, legacy initialization or
 session support, prompts, resources, sampling, elicitation, MCP Apps UI,
-database persistence, or a web server. Task support is advertised only when a
-complete durable store and runner are configured. Subscriptions remain
-unavailable until their clustered notification adapter exists.
+database persistence, a clustered notification adapter, or a web server. Task
+support is advertised only when a complete durable store and runner are
+configured. Task polling remains available without a notification adapter; a
+listen request then acknowledges an empty task set.
 
 ## Server example
 
@@ -115,8 +118,10 @@ The authorization adapter implements the
 `c:TamaMCP.Authorization.authenticate/2` callback and returns a
 `TamaMCP.Authorization.Decision`. The decision carries the
 authenticated principal, owner key, claims, granted scopes, credential expiry,
-and explicit application assigns. Authentication runs once before transport
-validation on every HTTP request.
+and explicit application assigns. Authentication runs before transport
+validation on every HTTP request. Long-lived streams additionally use
+`c:TamaMCP.Authorization.reauthorize/3`; adapters may register an immediate
+policy signal with `c:TamaMCP.Authorization.register_invalidation/3`.
 
 ## Durable tasks
 
@@ -152,6 +157,36 @@ restoration. The host adapter owns storage, concurrency, expiry, distribution,
 and any additional serialization required by its cache engine. Cached validator
 values are opaque Erlang terms and may contain functions.
 
+## Task subscriptions
+
+Configure a `TamaMCP.Notification` alongside the durable task adapters to
+accept task IDs on `subscriptions/listen`. The package includes
+`TamaMCP.Notification.Local` for tests and single-node development:
+
+```elixir
+children = [
+  {TamaMCP.Notification.Local, name: Example.Notification}
+]
+
+forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
+  server: Example.Server,
+  authorization: Example.Authorization,
+  cache: Example.Cache,
+  task_store: Example.TaskStore,
+  task_runner: Example.TaskRunner,
+  notification: TamaMCP.Notification.Local,
+  notification_options: [server: Example.Notification]
+```
+
+After a visible task transition commits, application-owned store or runner
+code calls `TamaMCP.Notification.publish_committed/2` with the committed
+task and the task-store options supplied by TamaMCP. Publication is a lossy
+hint: failure never rolls back the task. Streams reauthorize before delivery
+and while idle, close at credential expiry or their configured lifetime, and
+close slow consumers when their bounded queue overflows. Clients reconcile
+every interruption with owner-bound `tasks/get`; Phase 3 provides no replay or
+resumable SSE log.
+
 ## Conformance
 
 `TamaMCP.Conformance` validates complete core and Tasks requests and responses
@@ -166,6 +201,12 @@ all five states, invalid cross-state payloads, recovery, capability and owner
 denials, cancellation races, and unsupported task methods. Successful task
 responses validate the complete JSON-RPC envelope independently from the nested
 Tasks result.
+
+The subscription set adds seven deterministic JSON/SSE fixtures for
+acknowledgement, authorized delivery, reconnect, capability denial, credential
+expiry, policy invalidation, and overflow. `TamaMCP.Conformance` compares
+ordered SSE events and validates each event against the pinned core and Tasks
+schemas.
 
 Host applications can call `TamaMCP.Conformance.validate/3` for individual
 values, `TamaMCP.Conformance.validate_schema_fixtures/3` for the static task

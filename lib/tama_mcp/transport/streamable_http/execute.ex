@@ -231,6 +231,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Execute do
       clock_options: runtime.clock_options,
       task_store: runtime.task_store,
       task_store_options: Runtime.effective_task_store_options(runtime, validation_options),
+      notification: runtime.notification,
+      notification_options: runtime.notification_options,
       task_validation_options: validation_options
     ]
 

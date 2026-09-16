@@ -2,7 +2,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   @moduledoc """
   Validated immutable configuration for the Streamable HTTP transport.
 
-  Build it through `build/1`. Unknown, duplicate, future-phase, unbounded, and
+  Build it through `build/1`. Unknown, duplicate, unbounded, and
   malformed options fail during plug initialization.
   """
 
@@ -20,6 +20,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     max_task_ttl_ms: 604_800_000,
     default_poll_interval_ms: 1_000,
     max_input_request_keys_per_task: 256,
+    max_task_ids_per_subscription: 100,
+    notification_buffer_capacity: 100,
+    stream_keepalive_interval_ms: 15_000,
+    stream_authorization_recheck_ms: 60_000,
+    stream_max_lifetime_ms: 3_600_000,
     max_status_message_bytes: 2_048,
     max_error_data_bytes: 8_192,
     max_www_authenticate_bytes: 4_096,
@@ -36,6 +41,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     :task_store_options,
     :task_runner,
     :task_runner_options,
+    :notification,
+    :notification_options,
     :clock,
     :clock_options,
     :identifier,
@@ -57,6 +64,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     :task_store_options,
     :task_runner,
     :task_runner_options,
+    :notification,
+    :notification_options,
     :clock,
     :clock_options,
     :identifier,
@@ -78,6 +87,8 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
           task_store_options: keyword(),
           task_runner: module() | nil,
           task_runner_options: keyword(),
+          notification: module() | nil,
+          notification_options: keyword(),
           clock: module(),
           clock_options: keyword(),
           identifier: module(),
@@ -115,6 +126,12 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
       task_runner: Validation.optional_module!(opts, :task_runner),
       task_runner_options:
         Validation.keyword!(Keyword.get(opts, :task_runner_options, []), "task_runner_options"),
+      notification: Validation.optional_module!(opts, :notification),
+      notification_options:
+        Validation.keyword!(
+          Keyword.get(opts, :notification_options, []),
+          "notification_options"
+        ),
       clock: Validation.optional_module!(opts, :clock, TamaMCP.Clock.System),
       clock_options: Validation.keyword!(Keyword.get(opts, :clock_options, []), "clock_options"),
       identifier: Validation.optional_module!(opts, :identifier, TamaMCP.Identifier.UUID),
@@ -128,6 +145,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
     }
 
     Validation.tasks!(runtime, Keyword.has_key?(opts, :task_selector))
+    Validation.notifications!(runtime)
     Validation.catalog!(server, runtime)
     runtime
   end
@@ -136,6 +154,11 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   @spec task_capable?(t()) :: boolean()
   def task_capable?(%__MODULE__{task_store: store, task_runner: runner}),
     do: not is_nil(store) and not is_nil(runner)
+
+  @doc false
+  @spec notification_capable?(t()) :: boolean()
+  def notification_capable?(%__MODULE__{notification: notification}),
+    do: not is_nil(notification)
 
   @doc false
   @spec task_validation_options(t(), module() | nil) :: keyword()
@@ -163,7 +186,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   @doc false
   @spec effective_task_store_options(t(), keyword()) :: keyword()
   def effective_task_store_options(%__MODULE__{} = runtime, validation_options) do
-    namespace = [task_validation_options: validation_options]
+    namespace = [
+      task_validation_options: validation_options,
+      notification: runtime.notification,
+      notification_options: runtime.notification_options,
+      telemetry_prefix: runtime.telemetry_prefix,
+      server: runtime.server.name()
+    ]
+
     Keyword.put(runtime.task_store_options, :tama_mcp, namespace)
   end
 

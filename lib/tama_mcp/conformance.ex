@@ -7,17 +7,19 @@ defmodule TamaMCP.Conformance do
   TamaMCP. This keeps Tama's composed-server tests on the package's pinned
   protocol revision without exposing the transport's internal codec modules.
 
-  Supported values are complete core requests and responses plus the task
-  requests, task results, and detailed task values defined by the pinned Tasks
+  Supported values are complete core requests and responses, subscription
+  requests and ordered SSE events, plus the task requests, task results,
+  notifications, and detailed task values defined by the pinned Tasks
   extension.
 
   `run/2` passes each fixture's `%{"headers" => [[name, value]], "body" => map}`
-  request to the supplied callback. Task fixtures may also include a bounded
-  `setup` description alongside those wire fields so a host contract adapter
-  can arrange the required durable state. The callback returns
-  `%{status: integer, headers: [{name, value}], body: map}`. Applications may
-  run the bundled reference fixtures or supply fixtures with their own
-  authorization header and synchronous tool contract.
+  request to the supplied callback. Task and subscription fixtures may also
+  include a bounded `setup` description alongside those wire fields so a host
+  contract adapter can arrange the required durable state and stream controls.
+  JSON callbacks return `%{status: integer, headers: [{name, value}], body: map}`.
+  Stream callbacks instead return ordered decoded `:events` and a `:close`
+  classification. Applications may run the bundled reference fixtures or
+  supply fixtures with their own authorization header and tool contract.
 
   `validate_schema_fixtures/3` checks the static positive and negative task
   values bundled beside the HTTP fixtures. These assertions cover invalid
@@ -34,12 +36,21 @@ defmodule TamaMCP.Conformance do
                         "../../test/fixtures/protocol/2026-07-28/tasks.json",
                         __DIR__
                       )
+  @subscriptions_fixture_path Path.expand(
+                                "../../test/fixtures/protocol/2026-07-28/subscriptions.json",
+                                __DIR__
+                              )
   @external_resource @core_fixture_path
   @external_resource @tasks_fixture_path
+  @external_resource @subscriptions_fixture_path
   @core_fixtures @core_fixture_path |> File.read!() |> Jason.decode!() |> Map.fetch!("fixtures")
   @tasks_document @tasks_fixture_path |> File.read!() |> Jason.decode!()
   @tasks_fixtures Map.fetch!(@tasks_document, "fixtures")
   @task_schema_fixtures Map.get(@tasks_document, "schemaFixtures", [])
+  @subscription_fixtures @subscriptions_fixture_path
+                         |> File.read!()
+                         |> Jason.decode!()
+                         |> Map.fetch!("fixtures")
 
   @kinds %{
     "call_tool_request" => :call_tool_request,
@@ -53,6 +64,10 @@ defmodule TamaMCP.Conformance do
     "list_tools_result" => :list_tools_result,
     "list_tools_response" => :list_tools_response,
     "result_response" => :result_response,
+    "subscriptions_acknowledged_notification" => :subscriptions_acknowledged_notification,
+    "subscriptions_listen_request" => :subscriptions_listen_request,
+    "subscriptions_listen_result" => :subscriptions_listen_result,
+    "subscriptions_listen_response" => :subscriptions_listen_response,
     "task_profile" => :task_profile,
     "cancel_task_request" => :cancel_task_request,
     "cancel_task_result" => :cancel_task_result,
@@ -64,6 +79,11 @@ defmodule TamaMCP.Conformance do
     "get_task_request" => :get_task_request,
     "get_task_result" => :get_task_result,
     "input_required_task" => :input_required_task,
+    "task_status_notification" => :task_status_notification,
+    "task_status_notification_params" => :task_status_notification_params,
+    "task_subscription_acknowledged_notifications" =>
+      :task_subscription_acknowledged_notifications,
+    "task_subscription_notifications" => :task_subscription_notifications,
     "update_task_request" => :update_task_request,
     "update_task_result" => :update_task_result,
     "working_task" => :working_task
@@ -81,6 +101,10 @@ defmodule TamaMCP.Conformance do
           | :list_tools_result
           | :list_tools_response
           | :result_response
+          | :subscriptions_acknowledged_notification
+          | :subscriptions_listen_request
+          | :subscriptions_listen_result
+          | :subscriptions_listen_response
           | :task_profile
           | :cancel_task_request
           | :cancel_task_result
@@ -92,6 +116,10 @@ defmodule TamaMCP.Conformance do
           | :get_task_request
           | :get_task_result
           | :input_required_task
+          | :task_status_notification
+          | :task_status_notification_params
+          | :task_subscription_acknowledged_notifications
+          | :task_subscription_notifications
           | :update_task_request
           | :update_task_result
           | :working_task
@@ -138,9 +166,13 @@ defmodule TamaMCP.Conformance do
   @spec task_schema_fixtures() :: [map()]
   def task_schema_fixtures, do: @task_schema_fixtures
 
+  @doc "Returns the immutable subscription wire fixtures bundled with TamaMCP."
+  @spec subscription_fixtures() :: [map()]
+  def subscription_fixtures, do: @subscription_fixtures
+
   @doc "Returns the complete immutable core and Tasks fixture set."
   @spec all_fixtures() :: [map()]
-  def all_fixtures, do: @core_fixtures ++ @tasks_fixtures
+  def all_fixtures, do: @core_fixtures ++ @tasks_fixtures ++ @subscription_fixtures
 
   @doc "Validates static Tasks values against their expected vendored schema outcomes."
   @spec validate_schema_fixtures(module(), [map()], keyword()) ::
@@ -193,6 +225,16 @@ defmodule TamaMCP.Conformance do
       when is_map(fixture) and is_map(response) and is_atom(cache) and is_list(cache_options) do
     expected = fixture["expected"]
 
+    if Map.has_key?(expected, "events") do
+      verify_stream(fixture, response, cache, cache_options)
+    else
+      verify_response(fixture, response, cache, cache_options)
+    end
+  end
+
+  defp verify_response(fixture, response, cache, cache_options) do
+    expected = fixture["expected"]
+
     []
     |> compare("status", expected["status"], response[:status])
     |> compare("body", expected["body"], response[:body])
@@ -204,6 +246,7 @@ defmodule TamaMCP.Conformance do
       cache,
       cache_options
     )
+    |> verify_request_extension(fixture, cache, cache_options)
     |> verify_optional_schema(
       fixture["responseEnvelopeSchema"],
       Map.get(fixture, "responseEnvelopeValid", true),
@@ -222,6 +265,62 @@ defmodule TamaMCP.Conformance do
       [] -> :ok
       errors -> {:error, Enum.reverse(errors)}
     end
+  end
+
+  defp verify_stream(fixture, response, cache, cache_options) do
+    expected = fixture["expected"]
+
+    []
+    |> compare("status", expected["status"], response[:status])
+    |> compare("events", expected["events"], response[:events])
+    |> compare("close", expected["close"], response[:close])
+    |> compare_headers(expected["headers"], response[:headers])
+    |> verify_schema(
+      fixture["requestSchema"],
+      fixture["requestValid"],
+      fixture["request"]["body"],
+      cache,
+      cache_options
+    )
+    |> verify_request_extension(fixture, cache, cache_options)
+    |> verify_event_schemas(fixture, response[:events], cache, cache_options)
+    |> case do
+      [] -> :ok
+      errors -> {:error, Enum.reverse(errors)}
+    end
+  end
+
+  defp verify_request_extension(errors, fixture, cache, cache_options) do
+    case fixture["requestExtensionSchema"] do
+      nil ->
+        errors
+
+      schema ->
+        verify_schema(
+          errors,
+          schema,
+          Map.get(fixture, "requestExtensionValid", true),
+          at_path(fixture["request"]["body"], fixture["requestExtensionPath"]),
+          cache,
+          cache_options
+        )
+    end
+  end
+
+  defp verify_event_schemas(errors, fixture, events, cache, cache_options) do
+    Enum.reduce(fixture["eventSchemas"] || [], errors, fn check, acc ->
+      event = if is_list(events), do: Enum.at(events, check["index"]), else: nil
+      value = at_path(event, check["path"])
+
+      verify_schema(
+        acc,
+        check["schema"],
+        Map.get(check, "valid", true),
+        value,
+        cache,
+        cache_options
+      )
+    end)
   end
 
   defp compare(errors, _field, expected, actual) when expected == actual, do: errors
@@ -264,6 +363,10 @@ defmodule TamaMCP.Conformance do
       :get_task_request,
       :get_task_result,
       :input_required_task,
+      :task_status_notification,
+      :task_status_notification_params,
+      :task_subscription_acknowledged_notifications,
+      :task_subscription_notifications,
       :update_task_request,
       :update_task_result,
       :working_task

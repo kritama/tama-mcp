@@ -37,6 +37,11 @@ defmodule TamaMCP.Task.Store do
   `cancelled`, and it must not overwrite a terminal state that wins the race.
   The adapter may signal its durable worker only after cancellation intent is
   committed.
+
+  After any visible task transition commits, an adapter may call
+  `TamaMCP.Notification.publish_committed/2` with the committed task and
+  these store options. Publication is deliberately outside the transaction;
+  failure does not roll back the task and clients recover through `tasks/get`.
   """
 
   alias TamaMCP.{Error, Task}

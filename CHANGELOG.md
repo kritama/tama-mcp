@@ -32,6 +32,15 @@ The project follows Semantic Versioning and uses Conventional Commits.
 - Reference task-store coverage for atomic one-time input responses, durable
   idempotent cancellation intent, recovery through a fresh runtime, and
   concurrent mutation races.
+- Adapter-neutral task notification behaviour and a bounded process-local
+  reference adapter.
+- Long-lived `subscriptions/listen` SSE responses with acknowledgement-first
+  ordering, owner-authorized task subsets, complete `notifications/tasks`
+  snapshots, keepalives, graceful closure, and subscription ID correlation.
+- Stream reauthorization at delivery and idle boundaries, credential-expiry
+  closure, immediate policy-invalidation hooks, and bounded overflow cleanup.
+- Seven deterministic subscription conformance fixtures with ordered SSE event
+  and pinned core/Tasks schema validation.
 
 ### Security
 
@@ -58,3 +67,6 @@ The project follows Semantic Versioning and uses Conventional Commits.
   version negotiation or header/body comparison.
 - Validate OAuth scope-token syntax and reject oversized insufficient-scope
   challenges during transport initialization.
+- Re-fetch every notification hint through the owner-bound durable store before
+  delivery, close the entire stream on stale authorization, and keep slow
+  subscribers from creating unbounded adapter state or process mailboxes.

@@ -142,6 +142,29 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime.Validation do
     identifier!(runtime.identifier)
   end
 
+  def notifications!(%Runtime{notification: nil, notification_options: []}), do: :ok
+
+  def notifications!(%Runtime{notification: nil}) do
+    raise ArgumentError, "notification_options requires notification"
+  end
+
+  def notifications!(%Runtime{} = runtime) do
+    unless Runtime.task_capable?(runtime) do
+      raise ArgumentError, "notification requires task_store and task_runner"
+    end
+
+    unless exports?(runtime.notification,
+             subscribe: 4,
+             take: 2,
+             unsubscribe: 2,
+             publish: 2
+           ) do
+      raise ArgumentError,
+            "notification: #{inspect(runtime.notification)} does not implement " <>
+              "TamaMCP.Notification"
+    end
+  end
+
   defp task_pair!(nil, nil, false), do: :ok
 
   defp task_pair!(nil, nil, true),
