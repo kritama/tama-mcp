@@ -685,6 +685,46 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
     assert persisted.revision == initial.revision + 1
   end
 
+  test "a runner that returns the committed terminal snapshot instead of the initial one fails",
+       %{
+         runtime: runtime,
+         store: store
+       } do
+    completed_result = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => "finished immediately"}],
+      "isError" => false
+    }
+
+    runtime = %{
+      runtime
+      | task_runner_options: [
+          test: self(),
+          return_snapshot: :persisted,
+          transition_after_create:
+            {:completed, %{last_updated_at: @later, result: completed_result}}
+        ]
+    }
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tools_call),
+        %{"name" => "task_required", "arguments" => %{"value" => "hello"}},
+        name: "task_required"
+      )
+
+    # The returned value is the committed terminal snapshot, not the initial
+    # working snapshot, so created-task validation rejects it.
+    assert conn.status == 500
+    assert get_in(decode(conn), ["error", "code"]) == @internal
+    refute decode(conn)["result"]
+    assert_receive {:task_started, _, _, _, %Task{status: :completed}, _generated}
+
+    assert {:ok, persisted} = Store.get("test-owner", "task-phase2-1", agent: store)
+    assert persisted.status == :completed
+  end
+
   test "task creation honors explicitly raised runtime bounds", %{store: store} do
     runtime =
       runtime(store, self(),

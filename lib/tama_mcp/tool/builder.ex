@@ -62,10 +62,21 @@ defmodule TamaMCP.Tool.Builder do
     {schema, compile!(schema, "default input schema", env.module, :input)}
   end
 
-  defp compile_schema!({allow_unknown?, fields}, kind, env) when is_boolean(allow_unknown?) do
+  defp compile_schema!({:object, allow_unknown?, fields}, kind, env)
+       when is_boolean(allow_unknown?) do
     schema = Schema.build_object_schema(fields, allow_unknown_keys: allow_unknown?)
     validate_root!(schema, kind, env)
     {schema, compile!(schema, "#{kind} schema", env.module, kind)}
+  end
+
+  defp compile_schema!({:variants, variants}, :output, env) do
+    schemas =
+      Enum.map(variants, fn {_name, allow_unknown?, fields} ->
+        Schema.build_object_schema(fields, allow_unknown_keys: allow_unknown?)
+      end)
+
+    schema = %{"anyOf" => schemas}
+    {schema, compile!(schema, "output schema", env.module, :output)}
   end
 
   defp compile_schema!({:raw, schema}, kind, env) do

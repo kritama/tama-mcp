@@ -95,7 +95,6 @@ defmodule TamaMCP.Schema do
       |> Enum.filter(fn {_name, _type, opts} -> Keyword.get(opts, :required, false) end)
       |> Enum.map(&elem(&1, 0))
       |> Enum.map(&to_string/1)
-      |> Enum.sort()
 
     schema = %{"type" => "object", "properties" => properties}
     schema = if required == [], do: schema, else: Map.put(schema, "required", required)
@@ -106,32 +105,36 @@ defmodule TamaMCP.Schema do
   @spec field_schema(term(), keyword()) :: map()
   def field_schema(type, opts \\ []) do
     schema = type_schema(type)
-    apply_common_options(schema, opts, type)
+    apply_common_options(schema, opts, constraint_type(type))
   end
+
+  defp constraint_type({:nullable, type}), do: constraint_type(type)
+  defp constraint_type(type), do: type
 
   @primitive_types [:string, :integer, :number, :boolean]
 
   @doc "Builds the base schema map for a field type."
   @spec type_schema(term()) :: map()
-  def type_schema(type) do
-    case type do
-      {:enum, values} ->
-        enum_schema(values)
+  def type_schema({:enum, values}), do: enum_schema(values)
 
-      {:array, item} ->
-        %{"type" => "array", "items" => type_schema(item)}
+  def type_schema({:array, item}),
+    do: %{"type" => "array", "items" => type_schema(item)}
 
-      {:raw, map} when is_map(map) ->
-        map
+  def type_schema({:nullable, item}),
+    do: %{"anyOf" => [type_schema(item), %{"type" => "null"}]}
 
-      primitive when primitive in @primitive_types ->
-        %{"type" => to_string(primitive)}
+  def type_schema({:object, fields, allow_unknown?})
+      when is_list(fields) and is_boolean(allow_unknown?),
+      do: build_object_schema(fields, allow_unknown_keys: allow_unknown?)
 
-      other ->
-        raise Error,
-          message: "unsupported field type: #{inspect(other)}"
-    end
-  end
+  def type_schema({:raw, map}) when is_map(map), do: map
+  def type_schema(:object), do: %{"type" => "object"}
+
+  def type_schema(primitive) when primitive in @primitive_types,
+    do: %{"type" => to_string(primitive)}
+
+  def type_schema(other),
+    do: raise(Error, message: "unsupported field type: #{inspect(other)}")
 
   defp enum_schema(values) when is_list(values) and values != [] do
     kind = enum_kind!(values)
@@ -225,7 +228,7 @@ defmodule TamaMCP.Schema do
   defp validated_length(nil, _type, _option), do: nil
 
   defp validated_length(_value, type, option),
-    do: raise(Error, message: "#{option} applies only to string fields (got #{type})")
+    do: raise(Error, message: "#{option} applies only to string fields (got #{inspect(type)})")
 
   defp validated_number_bound(nil, _type), do: nil
 
@@ -234,7 +237,7 @@ defmodule TamaMCP.Schema do
   end
 
   defp validated_number_bound(_value, type),
-    do: raise(Error, message: "min/max apply only to number fields (got #{type})")
+    do: raise(Error, message: "min/max apply only to number fields (got #{inspect(type)})")
 
   defp number_bound_error(value, type),
     do:
@@ -246,5 +249,5 @@ defmodule TamaMCP.Schema do
   defp validated_pattern(nil, _type), do: nil
 
   defp validated_pattern(_value, type),
-    do: raise(Error, message: "pattern applies only to string fields (got #{type})")
+    do: raise(Error, message: "pattern applies only to string fields (got #{inspect(type)})")
 end

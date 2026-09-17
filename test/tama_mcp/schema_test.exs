@@ -82,6 +82,44 @@ defmodule TamaMCP.SchemaTest do
     assert schema["required"] == ["id"]
   end
 
+  test "preserves required field declaration order" do
+    schema =
+      Schema.build_object_schema([
+        {:z, :string, [required: true]},
+        {:optional, :string, []},
+        {:a, :string, [required: true]}
+      ])
+
+    assert schema["required"] == ["z", "a"]
+  end
+
+  test "builds object, nullable, and recursively composed field types" do
+    assert Schema.type_schema(:object) == %{"type" => "object"}
+
+    assert Schema.type_schema({:array, :object}) == %{
+             "type" => "array",
+             "items" => %{"type" => "object"}
+           }
+
+    assert Schema.type_schema({:nullable, {:array, :object}}) == %{
+             "anyOf" => [
+               %{"type" => "array", "items" => %{"type" => "object"}},
+               %{"type" => "null"}
+             ]
+           }
+
+    assert Schema.type_schema(
+             {:object, [{:identifier, :string, [required: true, min_length: 1]}], false}
+           ) == %{
+             "type" => "object",
+             "properties" => %{
+               "identifier" => %{"type" => "string", "minLength" => 1}
+             },
+             "required" => ["identifier"],
+             "additionalProperties" => false
+           }
+  end
+
   test "validates enum shapes" do
     assert Schema.type_schema({:enum, [2, 1]}) == %{"type" => "integer", "enum" => [1, 2]}
 
@@ -124,6 +162,49 @@ defmodule TamaMCP.SchemaTest do
 
     assert_raise Schema.Error, ~r/pattern applies only/, fn ->
       Schema.field_schema(:integer, pattern: "x")
+    end
+  end
+
+  test "applies type-specific constraints to nullable primitive fields" do
+    string_schema =
+      Schema.field_schema({:nullable, :string},
+        min_length: 2,
+        max_length: 4,
+        pattern: "^[a-z]+$"
+      )
+
+    assert string_schema == %{
+             "anyOf" => [%{"type" => "string"}, %{"type" => "null"}],
+             "minLength" => 2,
+             "maxLength" => 4,
+             "pattern" => "^[a-z]+$"
+           }
+
+    assert {:ok, string_validator} = Schema.compile(string_schema)
+    assert :ok = Schema.validate(string_validator, nil)
+    assert :ok = Schema.validate(string_validator, "word")
+    assert {:error, _details} = Schema.validate(string_validator, "a")
+    assert {:error, _details} = Schema.validate(string_validator, "UP")
+
+    number_schema = Schema.field_schema({:nullable, :number}, min: 1, max: 2.5)
+
+    assert number_schema == %{
+             "anyOf" => [%{"type" => "number"}, %{"type" => "null"}],
+             "minimum" => 1,
+             "maximum" => 2.5
+           }
+
+    assert {:ok, number_validator} = Schema.compile(number_schema)
+    assert :ok = Schema.validate(number_validator, nil)
+    assert :ok = Schema.validate(number_validator, 1.5)
+    assert {:error, _details} = Schema.validate(number_validator, 0)
+
+    assert_raise Schema.Error, ~r/applies only to string/, fn ->
+      Schema.field_schema({:nullable, :integer}, min_length: 1)
+    end
+
+    assert_raise Schema.Error, ~r/apply only to number/, fn ->
+      Schema.field_schema({:nullable, :string}, min: 1)
     end
   end
 

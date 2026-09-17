@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
+## [0.1.2] (2026-09-17)
+
+### Added
+
+- Added object and nullable field composition, nested object declarations, and
+  bounded named output variants to the compile-time Tool schema DSL.
+
+### Fixed
+
+- Fixed a compile failure in tools that declare `annotations:`; the generated
+  annotation map is now escaped before injection into the module.
+- Documented the `TamaMCP.Task.Runner` contract that `start/4` must return the
+  initial `working` snapshot, not a later committed snapshot, and pinned the
+  rejected shape with a transport regression test.
+- Updated the README installation section for the published Hex package and
+  corrected the `TamaMCP.Conformance` moduledoc's `run/3` reference.
+
 ## [0.1.1] (2026-09-17)
 
 ### Changed

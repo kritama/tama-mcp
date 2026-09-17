@@ -29,6 +29,7 @@ defmodule TamaMCP.ToolTest do
   @moduledoc false
 
   alias TamaMCP.TestSupport.Cache
+  alias TamaMCP.TestSupport.Tools.Annotated
   alias TamaMCP.TestSupport.Tools.Headers
   alias TamaMCP.ToolTest.SideEffects
 
@@ -45,6 +46,22 @@ defmodule TamaMCP.ToolTest do
 
       assert_receive {:validator_cache_fetch, "tama_mcp:validator:1:" <> _fingerprinted_key}
       assert :ok = TamaMCP.Schema.validate(validator, %{"message" => "hello"})
+    end
+
+    test "annotations option compiles into metadata and helper functions" do
+      metadata = Annotated.tool_metadata()
+
+      assert metadata.title == "Annotated"
+
+      annotations = %{
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+
+      assert metadata.annotations == annotations
+      assert Annotated.annotations() == annotations
     end
 
     test "cache adapter failures remain bounded" do
@@ -112,6 +129,161 @@ defmodule TamaMCP.ToolTest do
              }
 
       assert mod.output_schema()["properties"]["status"]["enum"] == ["done"]
+    end
+
+    test "object fields, nested objects, nullable composition, and output variants build exact schemas" do
+      modules =
+        Code.compile_string(
+          """
+          defmodule TamaMCP.ToolTest.ComposedTool do
+            use TamaMCP.Tool
+
+            input_schema do
+              field(:metadata, :object, required: true)
+              field(:messages, {:array, :object}, required: true)
+
+              object :thread, required: true, description: "Caller-owned conversation" do
+                field(:identifier, :string, required: true, min_length: 1)
+
+                object :routing, allow_unknown_keys: true do
+                  field(:shard, :integer)
+                end
+              end
+            end
+
+            output_schema do
+              variant :success do
+                field(:schema_version, :string, required: true)
+                field(:result, {:nullable, :object}, required: true)
+                field(:messages, {:array, :object}, required: true)
+              end
+
+              variant :tool_error do
+                field(:schema_version, :string, required: true)
+                field(:error, :object, required: true)
+              end
+            end
+
+            @impl true
+            def call(_input, _context) do
+              {:ok, TamaMCP.Response.success(structured_content: %{})}
+            end
+          end
+          """,
+          "tool_test_composed.exs"
+        )
+
+      {mod, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.ComposedTool, 0)
+
+      assert mod.input_schema() == %{
+               "type" => "object",
+               "properties" => %{
+                 "metadata" => %{"type" => "object"},
+                 "messages" => %{"type" => "array", "items" => %{"type" => "object"}},
+                 "thread" => %{
+                   "type" => "object",
+                   "description" => "Caller-owned conversation",
+                   "properties" => %{
+                     "identifier" => %{"type" => "string", "minLength" => 1},
+                     "routing" => %{
+                       "type" => "object",
+                       "properties" => %{"shard" => %{"type" => "integer"}},
+                       "additionalProperties" => true
+                     }
+                   },
+                   "required" => ["identifier"],
+                   "additionalProperties" => false
+                 }
+               },
+               "required" => ["metadata", "messages", "thread"],
+               "additionalProperties" => false
+             }
+
+      assert mod.output_schema() == %{
+               "anyOf" => [
+                 %{
+                   "type" => "object",
+                   "properties" => %{
+                     "schema_version" => %{"type" => "string"},
+                     "result" => %{
+                       "anyOf" => [%{"type" => "object"}, %{"type" => "null"}]
+                     },
+                     "messages" => %{
+                       "type" => "array",
+                       "items" => %{"type" => "object"}
+                     }
+                   },
+                   "required" => ["schema_version", "result", "messages"],
+                   "additionalProperties" => false
+                 },
+                 %{
+                   "type" => "object",
+                   "properties" => %{
+                     "schema_version" => %{"type" => "string"},
+                     "error" => %{"type" => "object"}
+                   },
+                   "required" => ["schema_version", "error"],
+                   "additionalProperties" => false
+                 }
+               ]
+             }
+
+      assert mod.definition()["outputSchema"] == mod.output_schema()
+
+      input_validator = TamaMCP.Tool.input_validator(mod, Cache)
+
+      assert :ok =
+               TamaMCP.Schema.validate(input_validator, %{
+                 "metadata" => %{},
+                 "messages" => [],
+                 "thread" => %{"identifier" => "thread-1"}
+               })
+
+      assert {:error, _details} =
+               TamaMCP.Schema.validate(input_validator, %{
+                 "metadata" => %{},
+                 "messages" => [],
+                 "thread" => %{"identifier" => "thread-1", "unexpected" => true}
+               })
+
+      validator = TamaMCP.Tool.output_validator(mod, Cache)
+
+      assert :ok =
+               TamaMCP.Schema.validate(validator, %{
+                 "schema_version" => "1",
+                 "result" => nil,
+                 "messages" => []
+               })
+
+      assert :ok =
+               TamaMCP.Schema.validate(validator, %{
+                 "schema_version" => "1",
+                 "error" => %{"code" => "not_found"}
+               })
+
+      assert {:error, _details} =
+               TamaMCP.Schema.validate(validator, %{"schema_version" => "1"})
+    end
+
+    test "variants may opt into unknown keys independently" do
+      modules =
+        compile_output_tool(
+          "OpenVariant",
+          "",
+          """
+          variant :closed do
+            field(:value, :string)
+          end
+          variant :open, allow_unknown_keys: true do
+            field(:value, :integer)
+          end
+          """
+        )
+
+      {mod, _bytecode} = List.keyfind!(modules, TamaMCP.ToolTest.OpenVariant, 0)
+      [closed, open] = mod.output_schema()["anyOf"]
+      assert closed["additionalProperties"] == false
+      assert open["additionalProperties"] == true
     end
 
     test "raw literal input and output schema maps are accepted" do
@@ -343,7 +515,8 @@ defmodule TamaMCP.ToolTest do
     test "rejects non-JSON values in nested raw field schemas" do
       fields = [
         {"NestedRaw", ~s|field(:value, {:raw, %{"const" => :ok}})|},
-        {"ArrayNestedRaw", ~s|field(:values, {:array, {:raw, %{"const" => :ok}}})|}
+        {"ArrayNestedRaw", ~s|field(:values, {:array, {:raw, %{"const" => :ok}}})|},
+        {"NullableNestedRaw", ~s|field(:value, {:nullable, {:raw, %{"const" => :ok}}})|}
       ]
 
       for {suffix, field} <- fields do
@@ -379,6 +552,91 @@ defmodule TamaMCP.ToolTest do
 
       assert_raise CompileError, ~r/duplicate field name/, fn ->
         compile_tool("DuplicateField", "field(:value, :string)\nfield(:value, :integer)")
+      end
+    end
+
+    test "rejects invalid nested object declarations" do
+      invalid = [
+        {"DuplicateObjectField",
+         "field(:value, :string)\nobject(:value) do\nfield(:id, :string)\nend",
+         ~r/duplicate field name/},
+        {"UnknownObjectOption", "object(:value, unknown: true) do\nfield(:id, :string)\nend",
+         ~r/unknown object options/},
+        {"ObjectUnknownKeysType",
+         "object(:value, allow_unknown_keys: :yes) do\nfield(:id, :string)\nend",
+         ~r/allow_unknown_keys must be a boolean/},
+        {"EmptyObject", "object(:value) do\nend",
+         ~r/nested object .* must declare at least one field/}
+      ]
+
+      for {suffix, declaration, message} <- invalid do
+        assert_raise CompileError, message, fn -> compile_tool(suffix, declaration) end
+      end
+    end
+
+    test "rejects invalid output variant declarations" do
+      invalid = [
+        {"OneVariant", "variant(:only) do\nfield(:value, :string)\nend",
+         ~r/at least two variants/},
+        {"DuplicateVariant",
+         "variant(:same) do\nfield(:one, :string)\nend\nvariant(:same) do\nfield(:two, :string)\nend",
+         ~r/duplicate variant name/},
+        {"EmptyVariant", "variant(:one) do\nend\nvariant(:two) do\nfield(:value, :string)\nend",
+         ~r/variant :one must declare at least one field/},
+        {"MixedVariant",
+         "field(:value, :string)\nvariant(:error) do\nfield(:error, :object)\nend",
+         ~r/cannot mix field or object declarations with variants/},
+        {"VariantRootOptions",
+         "variant(:one) do\nfield(:one, :string)\nend\nvariant(:two) do\nfield(:two, :string)\nend",
+         ~r/output_schema allow_unknown_keys does not apply to variants/}
+      ]
+
+      for {suffix, declarations, message} <- invalid do
+        options = if suffix == "VariantRootOptions", do: "allow_unknown_keys: true", else: ""
+
+        assert_raise CompileError, message, fn ->
+          compile_output_tool(suffix, options, declarations)
+        end
+      end
+    end
+
+    test "bounds the number of output variants" do
+      declarations =
+        Enum.map_join(1..17, "\n", fn index ->
+          "variant(:v#{index}) do\nfield(:value, :string)\nend"
+        end)
+
+      assert_raise CompileError, ~r/at most 16 variants/, fn ->
+        compile_output_tool("TooManyVariants", "", declarations)
+      end
+    end
+
+    test "validates variant names and options" do
+      invalid = [
+        {"InvalidVariantName",
+         "variant(\"success\") do\nfield(:value, :string)\nend\nvariant(:error) do\nfield(:error, :object)\nend",
+         ~r/variant name must be a non-empty atom/},
+        {"UnknownVariantOption",
+         "variant(:success, unknown: true) do\nfield(:value, :string)\nend\nvariant(:error) do\nfield(:error, :object)\nend",
+         ~r/unknown variant options/},
+        {"VariantUnknownKeysType",
+         "variant(:success, allow_unknown_keys: :yes) do\nfield(:value, :string)\nend\nvariant(:error) do\nfield(:error, :object)\nend",
+         ~r/variant allow_unknown_keys must be a boolean/}
+      ]
+
+      for {suffix, declarations, message} <- invalid do
+        assert_raise CompileError, message, fn ->
+          compile_output_tool(suffix, "", declarations)
+        end
+      end
+    end
+
+    test "rejects variants in input schemas" do
+      assert_raise CompileError, ~r/variants are only allowed in output_schema/, fn ->
+        compile_tool(
+          "InputVariant",
+          "variant(:one) do\nfield(:one, :string)\nend\nvariant(:two) do\nfield(:two, :string)\nend"
+        )
       end
     end
 
@@ -528,6 +786,21 @@ defmodule TamaMCP.ToolTest do
       def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
     end
     """)
+  end
+
+  defp compile_output_tool(suffix, options, declarations) do
+    Code.compile_string(
+      """
+      defmodule TamaMCP.ToolTest.#{suffix} do
+        use TamaMCP.Tool
+        output_schema #{options} do
+          #{declarations}
+        end
+        def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+      end
+      """,
+      "tool_test_#{Macro.underscore(suffix)}.exs"
+    )
   end
 
   defp compile_raw_tool(schema) do

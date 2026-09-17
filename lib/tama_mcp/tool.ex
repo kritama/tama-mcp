@@ -3,8 +3,9 @@ defmodule TamaMCP.Tool do
   Compile-time tool DSL.
 
   A tool declares metadata, task policy, schemas, and a `call/2` callback.
-  Schema blocks accept only literal `field/2` and `field/3` declarations and
-  default to `additionalProperties: false`.
+  Schema blocks accept literal field, nested object, and output variant
+  declarations. Every declared object defaults to `additionalProperties:
+  false`.
   """
 
   alias TamaMCP.Cache.Validator
@@ -46,6 +47,53 @@ defmodule TamaMCP.Tool do
           }
   end
 
+  @doc """
+  Declares a tool at compile time.
+
+  Registers the `TamaMCP.Tool` behaviour and generates the compiled metadata,
+  wire schemas, and helper functions consumed by `TamaMCP.Server` when the tool
+  is listed. Schema bodies are declared with `input_schema/2`,
+  `output_schema/2`, `raw_input_schema/1`, and `raw_output_schema/1`; the tool
+  logic is the required `call/2` callback.
+
+  ## Options
+
+    * `:task` - task execution policy, one of `:disabled` (default), `:optional`,
+      or `:required`.
+    * `:scopes` - list of unique OAuth scope tokens required to call the tool
+      (default `[]`).
+    * `:description` - optional non-empty string shown in `tools/list`.
+    * `:title` - optional non-empty human-readable tool title.
+    * `:annotations` - keyword list of MCP tool annotations. `:title` accepts a
+      non-empty string; the hints `:readOnlyHint`, `:destructiveHint`,
+      `:idempotentHint`, and `:openWorldHint` accept booleans. An empty list
+      compiles to no annotations.
+
+  Any invalid option raises a `CompileError` with a bounded description.
+
+  ## Example
+
+      defmodule Example.Tools.Echo do
+        use TamaMCP.Tool,
+          task: :disabled,
+          scopes: ["example.echo"],
+          description: "Echoes the provided message back to the caller.",
+          annotations: [readOnlyHint: true, idempotentHint: true]
+
+        input_schema do
+          field(:message, :string, required: true, min_length: 1)
+        end
+
+        @impl true
+        def call(%{"message" => message}, _context) do
+          {:ok,
+           TamaMCP.Response.success(
+             content: [TamaMCP.Response.text(message)],
+             structured_content: %{"message" => message}
+           )}
+        end
+      end
+  """
   defmacro __using__(opts) do
     {task, scopes, description, title, annotations} = __configure__(opts)
 
@@ -54,7 +102,7 @@ defmodule TamaMCP.Tool do
             scopes: scopes,
             description: description,
             title: title,
-            annotations: annotations
+            annotations: Macro.escape(annotations)
           ] do
       import TamaMCP.Tool,
         only: [
@@ -85,22 +133,20 @@ defmodule TamaMCP.Tool do
   defmacro input_schema(opts \\ [], do: block) do
     Compiler.ensure_schema_available!(__CALLER__, :input)
     schema_opts = Compiler.schema_options!(opts, __CALLER__, "input_schema")
-    fields = Compiler.collect_fields(block, __CALLER__)
-    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+    schema = Compiler.collect_schema(block, schema_opts, :input, __CALLER__)
 
     quote do
-      @tama_mcp_input_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+      @tama_mcp_input_schema unquote(Macro.escape(schema))
     end
   end
 
   defmacro output_schema(opts \\ [], do: block) do
     Compiler.ensure_schema_available!(__CALLER__, :output)
     schema_opts = Compiler.schema_options!(opts, __CALLER__, "output_schema")
-    fields = Compiler.collect_fields(block, __CALLER__)
-    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+    schema = Compiler.collect_schema(block, schema_opts, :output, __CALLER__)
 
     quote do
-      @tama_mcp_output_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+      @tama_mcp_output_schema unquote(Macro.escape(schema))
     end
   end
 

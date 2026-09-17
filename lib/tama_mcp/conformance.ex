@@ -12,7 +12,7 @@ defmodule TamaMCP.Conformance do
   notifications, and detailed task values defined by the pinned Tasks
   extension.
 
-  `run/2` passes each fixture's `%{"headers" => [[name, value]], "body" => map}`
+  `run/3` passes each fixture's `%{"headers" => [[name, value]], "body" => map}`
   request to the supplied callback. Task and subscription fixtures may also
   include a bounded `setup` description alongside those wire fields so a host
   contract adapter can arrange the required durable state and stream controls.
