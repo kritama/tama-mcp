@@ -3,8 +3,9 @@ defmodule TamaMCP.Tool do
   Compile-time tool DSL.
 
   A tool declares metadata, task policy, schemas, and a `call/2` callback.
-  Schema blocks accept only literal `field/2` and `field/3` declarations and
-  default to `additionalProperties: false`.
+  Schema blocks accept literal field, nested object, and output variant
+  declarations. Every declared object defaults to `additionalProperties:
+  false`.
   """
 
   alias TamaMCP.Cache.Validator
@@ -85,22 +86,20 @@ defmodule TamaMCP.Tool do
   defmacro input_schema(opts \\ [], do: block) do
     Compiler.ensure_schema_available!(__CALLER__, :input)
     schema_opts = Compiler.schema_options!(opts, __CALLER__, "input_schema")
-    fields = Compiler.collect_fields(block, __CALLER__)
-    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+    schema = Compiler.collect_schema(block, schema_opts, :input, __CALLER__)
 
     quote do
-      @tama_mcp_input_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+      @tama_mcp_input_schema unquote(Macro.escape(schema))
     end
   end
 
   defmacro output_schema(opts \\ [], do: block) do
     Compiler.ensure_schema_available!(__CALLER__, :output)
     schema_opts = Compiler.schema_options!(opts, __CALLER__, "output_schema")
-    fields = Compiler.collect_fields(block, __CALLER__)
-    allow_unknown? = Keyword.fetch!(schema_opts, :allow_unknown_keys)
+    schema = Compiler.collect_schema(block, schema_opts, :output, __CALLER__)
 
     quote do
-      @tama_mcp_output_schema {unquote(allow_unknown?), unquote(Macro.escape(fields))}
+      @tama_mcp_output_schema unquote(Macro.escape(schema))
     end
   end
 
