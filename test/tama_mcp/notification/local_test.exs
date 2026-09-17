@@ -255,7 +255,8 @@ defmodule TamaMCP.Notification.LocalTest do
   } do
     dead_adapter = spawn(fn -> :ok end)
     monitor = Process.monitor(dead_adapter)
-    assert_receive {:DOWN, ^monitor, :process, ^dead_adapter, :normal}
+    assert_receive {:DOWN, ^monitor, :process, ^dead_adapter, reason}
+    assert reason in [:normal, :noproc]
 
     assert {:error, %TamaMCP.Error{}} =
              Local.take(make_ref(), server: dead_adapter)
