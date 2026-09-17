@@ -31,6 +31,37 @@ Use Conventional Commits. Changes to protocol fixtures, public modules, DSL
 syntax, tool schemas, task semantics, or notification shapes require tests and
 an update to the WIP specification or released documentation.
 
+## Releases
+
+Releases follow the Git Flow release cycle. CI runs on pull requests and
+`develop` pushes; a single release workflow runs on `main` pushes and publishes
+only when a new version lands.
+
+```console
+git flow release start 0.1.0
+```
+
+On the `release/*` branch:
+
+- set the new version in `mix.exs`; and
+- finalize `CHANGELOG.md` with a `## [<version>]` section.
+
+Open a pull request from `release/*` to `main`. Merging it triggers one full
+verification run (`hex.audit`, `precommit`, Dialyzer, `docs`, `hex.build`).
+When the workflow succeeds and the merge commit introduces a version without an
+existing `v<version>` tag, it creates the tag, publishes the package and
+documentation to Hex, creates a GitHub release from the matching
+`CHANGELOG.md` section, and records a `hex` deployment on the tag. The
+deployment ends in `success` only when both the Hex publish and the GitHub
+release succeed. `main` is then ready to merge back into `develop`:
+
+```console
+git flow release finish 0.1.0
+```
+
+Merges to `main` that do not change the package version run the same checks but
+publish nothing.
+
 ## Project constraints
 
 - Support MCP `2026-07-28` only.
