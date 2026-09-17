@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
+## Unreleased
+
+### Added
+
+- Added object and nullable field composition, nested object declarations, and
+  bounded named output variants to the compile-time Tool schema DSL.
+
 ## [0.1.1] (2026-09-17)
 
 ### Changed

@@ -104,6 +104,44 @@ defmodule Example.Server do
 end
 ```
 
+Schema fields support primitives, enums, arrays, open objects, nullable
+composition, and raw Draft 2020-12 fragments. Use an `object` declaration when
+the nested object's fields are known; declared objects reject unknown keys by
+default:
+
+```elixir
+input_schema do
+  object :thread, required: true do
+    field(:identifier, :string, required: true, min_length: 1)
+  end
+end
+```
+
+Use named variants when structured tool results have multiple root object
+shapes. Variants preserve declaration order in `anyOf`, require unique names,
+and independently default to `additionalProperties: false`:
+
+```elixir
+output_schema do
+  variant :success do
+    field(:schema_version, :string, required: true)
+    field(:result, {:nullable, :object}, required: true)
+    field(:messages, {:array, :object}, required: true)
+  end
+
+  variant :tool_error do
+    field(:schema_version, :string, required: true)
+    field(:error, :object, required: true)
+  end
+end
+```
+
+Nested objects and variants may set `allow_unknown_keys: true`. Output variant
+blocks contain two to sixteen variants and cannot be mixed with root field or
+object declarations. Schema construction and validation artifacts remain
+compile-time only; applications do not need Ecto or another runtime type
+system.
+
 Mount the transport with authorization and cache adapters:
 
 ```elixir

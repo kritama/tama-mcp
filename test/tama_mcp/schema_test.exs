@@ -82,6 +82,33 @@ defmodule TamaMCP.SchemaTest do
     assert schema["required"] == ["id"]
   end
 
+  test "builds object, nullable, and recursively composed field types" do
+    assert Schema.type_schema(:object) == %{"type" => "object"}
+
+    assert Schema.type_schema({:array, :object}) == %{
+             "type" => "array",
+             "items" => %{"type" => "object"}
+           }
+
+    assert Schema.type_schema({:nullable, {:array, :object}}) == %{
+             "anyOf" => [
+               %{"type" => "array", "items" => %{"type" => "object"}},
+               %{"type" => "null"}
+             ]
+           }
+
+    assert Schema.type_schema(
+             {:object, [{:identifier, :string, [required: true, min_length: 1]}], false}
+           ) == %{
+             "type" => "object",
+             "properties" => %{
+               "identifier" => %{"type" => "string", "minLength" => 1}
+             },
+             "required" => ["identifier"],
+             "additionalProperties" => false
+           }
+  end
+
   test "validates enum shapes" do
     assert Schema.type_schema({:enum, [2, 1]}) == %{"type" => "integer", "enum" => [1, 2]}
 

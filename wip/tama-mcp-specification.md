@@ -271,6 +271,21 @@ keys. Every assembled schema must recursively contain only JSON values and
 UTF-8 string map keys, including schemas nested through raw field types, so the
 compiled validator and advertised schema cannot diverge during JSON encoding.
 
+The builder supports `:object`, arrays of objects, and recursive
+`{:nullable, type}` composition. A known nested object uses an `object name do
+... end` declaration whose fields, required ordering, field options, and
+`allow_unknown_keys` behavior match a root object schema. This is compile-time
+JSON Schema composition, not an Ecto embed or a second application data model.
+
+An output schema may instead contain two to sixteen uniquely named `variant`
+blocks. Each non-empty variant builds one closed object schema, variants retain
+declaration order in the root `anyOf`, and each variant may independently opt
+into unknown keys. Root fields or nested-object declarations cannot be mixed
+with variants, and variants are not valid in input schemas. Variant names are
+compile-time identifiers only and do not appear on the wire. All field types,
+options, names, nested declarations, and variants remain literal-only and are
+compiled into the same validator artifacts as single-object schemas.
+
 Schemas must be compiled once and reused. Tool compilation validates each tool
 schema, and TamaMCP compilation validates each fixed vendored protocol schema.
 Both paths embed serialized compiled-validator artifacts so schema compilation

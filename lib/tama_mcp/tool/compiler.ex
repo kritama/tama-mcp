@@ -18,6 +18,9 @@ defmodule TamaMCP.Tool.Compiler do
     :max,
     :pattern
   ]
+  @object_options [:allow_unknown_keys | @field_options]
+  @variant_options [:allow_unknown_keys]
+  @max_variants 16
   @annotation_keys [:title, :readOnlyHint, :destructiveHint, :idempotentHint, :openWorldHint]
 
   @spec configure(keyword()) ::
@@ -83,20 +86,17 @@ defmodule TamaMCP.Tool.Compiler do
     end
   end
 
-  def collect_fields(block, caller) do
-    fields =
-      block
-      |> block_expressions()
-      |> Enum.map(&parse_field!(&1, caller))
+  def collect_schema(block, schema_opts, kind, caller) do
+    expressions = block_expressions(block)
 
-    names = Enum.map(fields, &elem(&1, 0))
-    duplicates = names -- Enum.uniq(names)
+    case Enum.any?(expressions, &variant_expression?/1) do
+      false ->
+        {:object, Keyword.fetch!(schema_opts, :allow_unknown_keys),
+         collect_fields(expressions, caller)}
 
-    if duplicates != [] do
-      raise compile_error(caller, "duplicate field name(s): #{inspect(Enum.uniq(duplicates))}")
+      true ->
+        collect_variants(expressions, schema_opts, kind, caller)
     end
-
-    fields
   end
 
   def literal_value!(expr, caller, label) do
@@ -165,22 +165,166 @@ defmodule TamaMCP.Tool.Compiler do
         "tool annotation #{inspect(key)} must be a boolean (or a non-empty string for :title)"
   end
 
+  defp collect_fields(expressions, caller) when is_list(expressions) do
+    fields = Enum.map(expressions, &parse_declaration!(&1, caller))
+    validate_unique_names!(fields, "field", caller)
+    fields
+  end
+
+  defp collect_nested_fields(nil, name, caller, line) do
+    raise compile_error(
+            caller,
+            "nested object #{inspect(name)} must declare at least one field",
+            line
+          )
+  end
+
+  defp collect_nested_fields({:__block__, _meta, []}, name, caller, line) do
+    collect_nested_fields(nil, name, caller, line)
+  end
+
+  defp collect_nested_fields(block, _name, caller, _line) do
+    block
+    |> block_expressions()
+    |> collect_fields(caller)
+  end
+
+  defp collect_variants(_expressions, _schema_opts, :input, caller) do
+    raise compile_error(caller, "variants are only allowed in output_schema")
+  end
+
+  defp collect_variants(expressions, schema_opts, :output, caller) do
+    unless Enum.all?(expressions, &variant_expression?/1) do
+      raise compile_error(caller, "cannot mix field or object declarations with variants")
+    end
+
+    if Keyword.fetch!(schema_opts, :allow_unknown_keys) do
+      raise compile_error(caller, "output_schema allow_unknown_keys does not apply to variants")
+    end
+
+    variants = Enum.map(expressions, &parse_variant!(&1, caller))
+    validate_variant_count!(variants, caller)
+    validate_unique_names!(variants, "variant", caller)
+    {:variants, variants}
+  end
+
+  defp validate_variant_count!(variants, caller) when length(variants) < 2 do
+    raise compile_error(caller, "output_schema must declare at least two variants")
+  end
+
+  defp validate_variant_count!(variants, caller) when length(variants) > @max_variants do
+    raise compile_error(caller, "output_schema may declare at most #{@max_variants} variants")
+  end
+
+  defp validate_variant_count!(_variants, _caller), do: :ok
+
+  defp validate_unique_names!(declarations, label, caller) do
+    names = Enum.map(declarations, &elem(&1, 0))
+    duplicates = names -- Enum.uniq(names)
+
+    if duplicates != [] do
+      raise compile_error(
+              caller,
+              "duplicate #{label} name(s): #{inspect(Enum.uniq(duplicates))}"
+            )
+    end
+  end
+
   defp block_expressions({:__block__, _meta, expressions}), do: expressions
   defp block_expressions(expressions) when is_list(expressions), do: expressions
   defp block_expressions(expression), do: [expression]
 
-  defp parse_field!({:field, meta, args}, caller), do: parse_field_args!(args, meta, caller)
+  defp variant_expression?({:variant, _meta, _args}), do: true
+  defp variant_expression?(_expression), do: false
 
-  defp parse_field!({:field, meta, args, _context}, caller),
+  defp parse_declaration!({:field, meta, args}, caller),
     do: parse_field_args!(args, meta, caller)
 
-  defp parse_field!(expression, caller) do
+  defp parse_declaration!({:field, meta, args, _context}, caller),
+    do: parse_field_args!(args, meta, caller)
+
+  defp parse_declaration!({:object, meta, args}, caller),
+    do: parse_object_args!(args, meta, caller)
+
+  defp parse_declaration!(expression, caller) do
     raise compile_error(
             caller,
-            "only field/2 or field/3 calls are allowed inside schema blocks, got: " <>
+            "only field/2, field/3, or object declarations are allowed inside object schemas, got: " <>
               Macro.to_string(expression),
             source_line(expression, caller)
           )
+  end
+
+  defp parse_object_args!([name_expr, [do: block]], meta, caller) do
+    parse_object_values!(name_expr, [], block, meta, caller)
+  end
+
+  defp parse_object_args!([name_expr, opts_expr, [do: block]], meta, caller) do
+    opts = literal_value!(opts_expr, caller, "object options")
+    parse_object_values!(name_expr, opts, block, meta, caller)
+  end
+
+  defp parse_object_args!(args, meta, caller) do
+    raise compile_error(
+            caller,
+            "object expects a name, optional options, and a do block, got: #{length(args)} arguments",
+            Keyword.get(meta, :line, caller.line)
+          )
+  end
+
+  defp parse_object_values!(name_expr, opts, block, meta, caller) do
+    line = Keyword.get(meta, :line, caller.line)
+    name = literal_name!(name_expr, "object", caller, line)
+    validate_keyword_options!(opts, @object_options, "object options", caller)
+    allow_unknown? = boolean_option!(opts, :allow_unknown_keys, false, "object", caller, line)
+    field_opts = Keyword.delete(opts, :allow_unknown_keys)
+    validate_field_options!(field_opts, caller, line)
+    fields = collect_nested_fields(block, name, caller, line)
+    {name, {:object, fields, allow_unknown?}, field_opts}
+  end
+
+  defp parse_variant!({:variant, meta, [name_expr, [do: block]]}, caller) do
+    parse_variant_values!(name_expr, [], block, meta, caller)
+  end
+
+  defp parse_variant!({:variant, meta, [name_expr, opts_expr, [do: block]]}, caller) do
+    opts = literal_value!(opts_expr, caller, "variant options")
+    parse_variant_values!(name_expr, opts, block, meta, caller)
+  end
+
+  defp parse_variant!({:variant, meta, args}, caller) do
+    raise compile_error(
+            caller,
+            "variant expects a name, optional options, and a do block, got: #{length(args)} arguments",
+            Keyword.get(meta, :line, caller.line)
+          )
+  end
+
+  defp parse_variant_values!(name_expr, opts, nil, meta, caller) do
+    line = Keyword.get(meta, :line, caller.line)
+    name = literal_name!(name_expr, "variant", caller, line)
+    validate_variant_options!(opts, caller, line)
+    raise compile_error(caller, "variant #{inspect(name)} must declare at least one field", line)
+  end
+
+  defp parse_variant_values!(name_expr, opts, block, meta, caller) do
+    line = Keyword.get(meta, :line, caller.line)
+    name = literal_name!(name_expr, "variant", caller, line)
+    allow_unknown? = validate_variant_options!(opts, caller, line)
+    fields = block |> block_expressions() |> collect_fields(caller)
+    ensure_variant_fields!(fields, name, caller, line)
+    {name, allow_unknown?, fields}
+  end
+
+  defp ensure_variant_fields!([], name, caller, line) do
+    raise compile_error(caller, "variant #{inspect(name)} must declare at least one field", line)
+  end
+
+  defp ensure_variant_fields!(_fields, _name, _caller, _line), do: :ok
+
+  defp validate_variant_options!(opts, caller, line) do
+    validate_keyword_options!(opts, @variant_options, "variant options", caller)
+    boolean_option!(opts, :allow_unknown_keys, false, "variant", caller, line)
   end
 
   defp parse_field_args!([name_expr, type_expr], meta, caller) do
@@ -202,15 +346,48 @@ defmodule TamaMCP.Tool.Compiler do
 
   defp parse_field_values!(name_expr, type_expr, opts, meta, caller) do
     line = Keyword.get(meta, :line, caller.line)
-    name = literal_value!(name_expr, caller, "field name")
+    name = literal_field_name!(name_expr, caller, line)
     type = literal_value!(type_expr, caller, "field type")
-
-    unless is_atom(name) and not is_nil(name) do
-      raise compile_error(caller, "field name must be an atom, got: #{inspect(name)}", line)
-    end
 
     validate_field_options!(opts, caller, line)
     {name, type, opts}
+  end
+
+  defp literal_field_name!(expr, caller, line) do
+    name = literal_value!(expr, caller, "field name")
+
+    if is_atom(name) and not is_nil(name) do
+      name
+    else
+      raise compile_error(caller, "field name must be an atom, got: #{inspect(name)}", line)
+    end
+  end
+
+  defp literal_name!(expr, label, caller, line) do
+    name = literal_value!(expr, caller, "#{label} name")
+
+    if is_atom(name) and not is_nil(name) and Atom.to_string(name) != "" do
+      name
+    else
+      raise compile_error(
+              caller,
+              "#{label} name must be a non-empty atom, got: #{inspect(name)}",
+              line
+            )
+    end
+  end
+
+  defp boolean_option!(opts, key, default, label, caller, line) do
+    case Keyword.fetch(opts, key) do
+      :error ->
+        default
+
+      {:ok, value} when is_boolean(value) ->
+        value
+
+      {:ok, _value} ->
+        raise compile_error(caller, "#{label} #{key} must be a boolean", line)
+    end
   end
 
   defp validate_field_options!(opts, caller, line) do
