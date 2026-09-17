@@ -266,7 +266,19 @@ Anubis MCP, ex_mcp, or a validator cache engine.
 
 ## Installation
 
-Until the first Hex release, use a sibling path for local development:
+Add the published Hex package to your dependencies:
+
+```elixir
+def deps do
+  [
+    {:tama_mcp, "~> 0.1.1"}
+  ]
+end
+```
+
+For local development against a sibling checkout of this repository, a path
+dependency can be used instead; it is not a supported way to consume the
+package:
 
 ```elixir
 def deps do
@@ -274,12 +286,6 @@ def deps do
     {:tama_mcp, path: "../tama-mcp"}
   ]
 end
-```
-
-After publication:
-
-```elixir
-{:tama_mcp, "~> 0.1.0"}
 ```
 
 ## Development
