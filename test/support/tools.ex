@@ -24,6 +24,29 @@ defmodule TamaMCP.TestSupport.Tools.Echo do
   end
 end
 
+defmodule TamaMCP.TestSupport.Tools.Annotated do
+  @moduledoc false
+
+  use TamaMCP.Tool,
+    task: :disabled,
+    scopes: ["test.annotated"],
+    description: "Declares tool annotations.",
+    title: "Annotated",
+    annotations: [
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    ]
+
+  @impl true
+  @doc """
+  Returns a successful empty response; the fixture exists only to compile the
+  annotation set and is never invoked at runtime.
+  """
+  def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+end
+
 defmodule TamaMCP.TestSupport.Tools.Failing do
   @moduledoc false
 
