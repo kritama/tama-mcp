@@ -22,6 +22,7 @@ jobs:
     environment: hex
     permissions:
       contents: write
+      deployments: write
     outputs:
       published: ${{ steps.tag.outputs.published }}
     steps:
@@ -91,6 +92,7 @@ jobs:
       - name: Create deployment
         id: deployment
         if: steps.tag.outputs.published == 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -139,7 +141,7 @@ jobs:
             --notes-file <(printf '%s\n' "${notes}")
 
       - name: Finalize deployment
-        if: always() && steps.tag.outputs.published == 'true'
+        if: always() && steps.deployment.outputs.deployment_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
