@@ -24,6 +24,25 @@ defmodule TamaMCP.TestSupport.Tools.Echo do
   end
 end
 
+defmodule TamaMCP.TestSupport.Tools.Annotated do
+  @moduledoc false
+
+  use TamaMCP.Tool,
+    task: :disabled,
+    scopes: ["test.annotated"],
+    description: "Declares tool annotations.",
+    title: "Annotated",
+    annotations: [
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    ]
+
+  @impl true
+  def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+end
+
 defmodule TamaMCP.TestSupport.Tools.Failing do
   @moduledoc false
 

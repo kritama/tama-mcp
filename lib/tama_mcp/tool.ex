@@ -55,7 +55,7 @@ defmodule TamaMCP.Tool do
             scopes: scopes,
             description: description,
             title: title,
-            annotations: annotations
+            annotations: Macro.escape(annotations)
           ] do
       import TamaMCP.Tool,
         only: [

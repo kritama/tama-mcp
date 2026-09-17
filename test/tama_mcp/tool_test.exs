@@ -29,6 +29,7 @@ defmodule TamaMCP.ToolTest do
   @moduledoc false
 
   alias TamaMCP.TestSupport.Cache
+  alias TamaMCP.TestSupport.Tools.Annotated
   alias TamaMCP.TestSupport.Tools.Headers
   alias TamaMCP.ToolTest.SideEffects
 
@@ -45,6 +46,22 @@ defmodule TamaMCP.ToolTest do
 
       assert_receive {:validator_cache_fetch, "tama_mcp:validator:1:" <> _fingerprinted_key}
       assert :ok = TamaMCP.Schema.validate(validator, %{"message" => "hello"})
+    end
+
+    test "annotations option compiles into metadata and helper functions" do
+      metadata = Annotated.tool_metadata()
+
+      assert metadata.title == "Annotated"
+
+      annotations = %{
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+
+      assert metadata.annotations == annotations
+      assert Annotated.annotations() == annotations
     end
 
     test "cache adapter failures remain bounded" do
