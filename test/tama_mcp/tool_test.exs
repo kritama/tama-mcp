@@ -178,7 +178,7 @@ defmodule TamaMCP.ToolTest do
                    "additionalProperties" => false
                  }
                },
-               "required" => ["messages", "metadata", "thread"],
+               "required" => ["metadata", "messages", "thread"],
                "additionalProperties" => false
              }
 
@@ -196,7 +196,7 @@ defmodule TamaMCP.ToolTest do
                        "items" => %{"type" => "object"}
                      }
                    },
-                   "required" => ["messages", "result", "schema_version"],
+                   "required" => ["schema_version", "result", "messages"],
                    "additionalProperties" => false
                  },
                  %{
@@ -205,7 +205,7 @@ defmodule TamaMCP.ToolTest do
                      "schema_version" => %{"type" => "string"},
                      "error" => %{"type" => "object"}
                    },
-                   "required" => ["error", "schema_version"],
+                   "required" => ["schema_version", "error"],
                    "additionalProperties" => false
                  }
                ]

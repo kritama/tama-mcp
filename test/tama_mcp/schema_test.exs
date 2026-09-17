@@ -82,6 +82,17 @@ defmodule TamaMCP.SchemaTest do
     assert schema["required"] == ["id"]
   end
 
+  test "preserves required field declaration order" do
+    schema =
+      Schema.build_object_schema([
+        {:z, :string, [required: true]},
+        {:optional, :string, []},
+        {:a, :string, [required: true]}
+      ])
+
+    assert schema["required"] == ["z", "a"]
+  end
+
   test "builds object, nullable, and recursively composed field types" do
     assert Schema.type_schema(:object) == %{"type" => "object"}
 

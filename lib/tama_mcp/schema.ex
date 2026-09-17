@@ -95,7 +95,6 @@ defmodule TamaMCP.Schema do
       |> Enum.filter(fn {_name, _type, opts} -> Keyword.get(opts, :required, false) end)
       |> Enum.map(&elem(&1, 0))
       |> Enum.map(&to_string/1)
-      |> Enum.sort()
 
     schema = %{"type" => "object", "properties" => properties}
     schema = if required == [], do: schema, else: Map.put(schema, "required", required)
