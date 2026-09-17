@@ -50,10 +50,10 @@ Open a pull request from `release/*` to `main`. Merging it triggers one full
 verification run (`hex.audit`, `precommit`, Dialyzer, `docs`, `hex.build`).
 When the workflow succeeds and the merge commit introduces a version without an
 existing `v<version>` tag, it creates the tag, publishes the package and
-documentation to Hex, creates a GitHub release from the matching
-`CHANGELOG.md` section, and records a `hex` deployment on the tag. The
-deployment ends in `success` only when both the Hex publish and the GitHub
-release succeed. `main` is then ready to merge back into `develop`:
+documentation to Hex, and creates a GitHub release from the matching
+`CHANGELOG.md` section. The `hex` environment records a deployment with its
+final status for every workflow run. `main` is then ready to merge back into
+`develop`:
 
 ```console
 git flow release finish 0.1.0
