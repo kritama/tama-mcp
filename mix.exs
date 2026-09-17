@@ -1,7 +1,7 @@
 defmodule TamaMCP.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.1.1"
   @source_url "https://github.com/kritama/tama-mcp"
 
   def project do
@@ -67,7 +67,7 @@ defmodule TamaMCP.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:jsonschex, "~> 0.3.0"},
+      {:jsonschex, "~> 0.10.0"},
       {:plug, "~> 1.18"},
       {:tama_oauth, "~> 0.4.1"},
       {:telemetry, "~> 1.3"},
