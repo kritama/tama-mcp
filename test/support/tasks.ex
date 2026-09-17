@@ -239,15 +239,24 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
     generated = Keyword.fetch!(options, :tama_mcp)
 
     {:ok, task} = build_task(context, generated)
-    persist(task, generated, Keyword.get(options, :persistence, :valid))
-    maybe_transition(task, generated, options)
+    persisted = persist(task, generated, Keyword.get(options, :persistence, :valid))
+    persisted = maybe_transition(persisted, generated, options)
+
+    returned =
+      case Keyword.get(options, :return_snapshot, :initial) do
+        :initial -> task
+        :persisted -> persisted
+      end
 
     case Keyword.get(options, :test) do
-      pid when is_pid(pid) -> send(pid, {:task_started, tool, input, context, task, generated})
-      _none -> :ok
+      pid when is_pid(pid) ->
+        send(pid, {:task_started, tool, input, context, returned, generated})
+
+      _none ->
+        :ok
     end
 
-    {:ok, task}
+    {:ok, returned}
   end
 
   defp build_task(context, generated) do
@@ -269,37 +278,47 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
     )
   end
 
-  defp persist(_task, _generated, :missing), do: :ok
+  defp persist(_task, _generated, :missing), do: nil
 
   defp persist(task, generated, mode) do
     {:ok, ^task} = Store.create(task, generated[:task_store_options])
 
     case mode do
       :valid ->
-        :ok
+        task
 
       :mismatched ->
+        task = %{task | request_id: "mismatched-request"}
+
         Store.replace(
           task.owner_key,
           task.id,
-          %{task | request_id: "mismatched-request"},
+          task,
           generated[:task_store_options]
         )
 
+        task
+
       :invalid ->
+        task = %{task | ttl_ms: 0}
+
         Store.replace(
           task.owner_key,
           task.id,
-          %{task | ttl_ms: 0},
+          task,
           generated[:task_store_options]
         )
+
+        task
     end
   end
+
+  defp maybe_transition(nil, _generated, _options), do: nil
 
   defp maybe_transition(task, generated, options) do
     case Keyword.get(options, :transition_after_create) do
       {status, attributes} ->
-        {:ok, _persisted} =
+        {:ok, persisted} =
           Store.transition(
             task.owner_key,
             task.id,
@@ -309,10 +328,10 @@ defmodule TamaMCP.TestSupport.Tasks.Runner do
             generated[:task_store_options]
           )
 
-        :ok
+        persisted
 
       nil ->
-        :ok
+        task
     end
   end
 end
