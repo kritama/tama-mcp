@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
+## [0.1.1] (2026-09-17)
+
+### Changed
+
+- Upgraded `jsonschex` from `0.3.0` to `0.10.0`.
+
 ## [0.1.0] (2026-09-17)
 
 ### Added
