@@ -40,6 +40,10 @@ defmodule TamaMCP.TestSupport.Tools.Annotated do
     ]
 
   @impl true
+  @doc """
+  Returns a successful empty response; the fixture exists only to compile the
+  annotation set and is never invoked at runtime.
+  """
   def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
 end
 

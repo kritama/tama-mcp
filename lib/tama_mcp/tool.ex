@@ -47,6 +47,53 @@ defmodule TamaMCP.Tool do
           }
   end
 
+  @doc """
+  Declares a tool at compile time.
+
+  Registers the `TamaMCP.Tool` behaviour and generates the compiled metadata,
+  wire schemas, and helper functions consumed by `TamaMCP.Server` when the tool
+  is listed. Schema bodies are declared with `input_schema/2`,
+  `output_schema/2`, `raw_input_schema/1`, and `raw_output_schema/1`; the tool
+  logic is the required `call/2` callback.
+
+  ## Options
+
+    * `:task` - task execution policy, one of `:disabled` (default), `:optional`,
+      or `:required`.
+    * `:scopes` - list of unique OAuth scope tokens required to call the tool
+      (default `[]`).
+    * `:description` - optional non-empty string shown in `tools/list`.
+    * `:title` - optional non-empty human-readable tool title.
+    * `:annotations` - keyword list of MCP tool annotations. `:title` accepts a
+      non-empty string; the hints `:readOnlyHint`, `:destructiveHint`,
+      `:idempotentHint`, and `:openWorldHint` accept booleans. An empty list
+      compiles to no annotations.
+
+  Any invalid option raises a `CompileError` with a bounded description.
+
+  ## Example
+
+      defmodule Example.Tools.Echo do
+        use TamaMCP.Tool,
+          task: :disabled,
+          scopes: ["example.echo"],
+          description: "Echoes the provided message back to the caller.",
+          annotations: [readOnlyHint: true, idempotentHint: true]
+
+        input_schema do
+          field(:message, :string, required: true, min_length: 1)
+        end
+
+        @impl true
+        def call(%{"message" => message}, _context) do
+          {:ok,
+           TamaMCP.Response.success(
+             content: [TamaMCP.Response.text(message)],
+             structured_content: %{"message" => message}
+           )}
+        end
+      end
+  """
   defmacro __using__(opts) do
     {task, scopes, description, title, annotations} = __configure__(opts)
 
