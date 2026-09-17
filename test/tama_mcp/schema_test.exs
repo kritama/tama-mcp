@@ -154,6 +154,49 @@ defmodule TamaMCP.SchemaTest do
     end
   end
 
+  test "applies type-specific constraints to nullable primitive fields" do
+    string_schema =
+      Schema.field_schema({:nullable, :string},
+        min_length: 2,
+        max_length: 4,
+        pattern: "^[a-z]+$"
+      )
+
+    assert string_schema == %{
+             "anyOf" => [%{"type" => "string"}, %{"type" => "null"}],
+             "minLength" => 2,
+             "maxLength" => 4,
+             "pattern" => "^[a-z]+$"
+           }
+
+    assert {:ok, string_validator} = Schema.compile(string_schema)
+    assert :ok = Schema.validate(string_validator, nil)
+    assert :ok = Schema.validate(string_validator, "word")
+    assert {:error, _details} = Schema.validate(string_validator, "a")
+    assert {:error, _details} = Schema.validate(string_validator, "UP")
+
+    number_schema = Schema.field_schema({:nullable, :number}, min: 1, max: 2.5)
+
+    assert number_schema == %{
+             "anyOf" => [%{"type" => "number"}, %{"type" => "null"}],
+             "minimum" => 1,
+             "maximum" => 2.5
+           }
+
+    assert {:ok, number_validator} = Schema.compile(number_schema)
+    assert :ok = Schema.validate(number_validator, nil)
+    assert :ok = Schema.validate(number_validator, 1.5)
+    assert {:error, _details} = Schema.validate(number_validator, 0)
+
+    assert_raise Schema.Error, ~r/applies only to string/, fn ->
+      Schema.field_schema({:nullable, :integer}, min_length: 1)
+    end
+
+    assert_raise Schema.Error, ~r/apply only to number/, fn ->
+      Schema.field_schema({:nullable, :string}, min: 1)
+    end
+  end
+
   test "distinguishes an omitted default from an explicit JSON null default" do
     type = {:raw, %{"type" => ["string", "null"]}}
 

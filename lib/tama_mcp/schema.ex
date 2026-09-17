@@ -106,8 +106,11 @@ defmodule TamaMCP.Schema do
   @spec field_schema(term(), keyword()) :: map()
   def field_schema(type, opts \\ []) do
     schema = type_schema(type)
-    apply_common_options(schema, opts, type)
+    apply_common_options(schema, opts, constraint_type(type))
   end
+
+  defp constraint_type({:nullable, type}), do: constraint_type(type)
+  defp constraint_type(type), do: type
 
   @primitive_types [:string, :integer, :number, :boolean]
 
