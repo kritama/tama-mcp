@@ -64,7 +64,7 @@ jobs:
           version="$(mix run --no-compile --no-start -e 'IO.write(Mix.Project.config()[:version])')"
           tag="v${version}"
 
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
             echo "Tag ${tag} already exists; not a release push."
             echo "published=false" >> "${GITHUB_OUTPUT}"
             exit 0
