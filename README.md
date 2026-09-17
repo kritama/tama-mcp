@@ -4,14 +4,17 @@ Tama-focused MCP `2026-07-28` server primitives for Elixir applications.
 
 `TamaMCP` exists so Tama can implement the current MCP server contract without
 depending on a general-purpose MCP framework or carrying compatibility code for
-older protocol eras. It will provide a small server and tool DSL, stateless
-Streamable HTTP transport, task execution, task notifications, authorization
-hooks, and adapter behaviours for application-owned persistence and clustered
-delivery.
+older protocol eras.
 
-The package is pre-release. Only the protocol and extension identifiers are
-implemented in the repository foundation; the runtime API described in the WIP
-specification is not yet available.
+The package is pre-release. Phase 1 provides the server and tool DSL, stateless
+Streamable HTTP transport, per-request authorization, discovery, deterministic
+tool listing, synchronous tool execution, schema validation, bounded telemetry,
+and reusable protocol conformance helpers. Phase 2 adds durable task contracts,
+server-directed task creation, task polling and mutation methods, and the full
+task conformance matrix. Phase 3 adds bounded subscription streams, authorized
+task notifications, stream reauthorization, and a process-local reference
+notification adapter. Tama's application-owned persistence, runner, and
+clustered notification adapters remain a separate integration phase.
 
 ## Boundary
 
@@ -32,10 +35,13 @@ Codex / OpenCode / Pi
 ```
 
 - `TamaMCP` owns MCP JSON-RPC validation, the server/tool DSL, stateless HTTP,
-  MCP Tasks, subscription streams, protocol responses, and adapter behaviours.
+  protocol responses, task values and transitions, durable task adapter
+  contracts, cache keys and compiled validator artifacts, subscription streams,
+  and the notification adapter contract.
 - `TamaOAuth` owns reusable OAuth and protected-resource protocol mechanics.
-- Tama owns identities, authorization policy, rate limits, Ecto persistence,
-  durable execution, task transitions, and graph results.
+- Tama owns identities, authorization policy, rate limits, the validator cache
+  engine, Ecto persistence, durable execution, task transitions, and graph
+  results.
 - Tama Link owns client compatibility, OAuth client behavior, local
   correlation, polling recovery, and downstream progress presentation.
 
@@ -44,31 +50,181 @@ for the complete contract and implementation acceptance criteria.
 
 ## Deliberate scope
 
-The initial package supports:
+The implemented package supports:
 
 - MCP protocol version `2026-07-28` only;
 - server-side stateless Streamable HTTP;
-- `server/discover`, `tools/list`, and `tools/call`;
-- the `io.modelcontextprotocol/tasks` extension;
-- `tasks/get`, `tasks/update`, and `tasks/cancel`;
-- `subscriptions/listen` and task-status notifications; and
-- application-supplied authorization, task-store, and notification-bus
-  adapters.
+- `server/discover`, `tools/list`, `tools/call`, `tasks/get`, `tasks/update`,
+  `tasks/cancel`, and `subscriptions/listen`;
+- authorization-aware tool visibility and scope enforcement;
+- application-supplied authorization decisions and safe context values;
+- server-directed durable execution for task-required tools and explicit
+  application selection for task-optional tools;
+- owner-bound task lookup, input-response submission, and cooperative
+  cancellation through application adapters;
+- bounded request execution, successful results, errors, headers, subscription
+  buffers, and telemetry; and
+- reusable conformance validation against the vendored core and Tasks schemas.
 
 It does not provide an MCP client, STDIO transport, legacy initialization or
 session support, prompts, resources, sampling, elicitation, MCP Apps UI,
-database persistence, or a web server.
+database persistence, a clustered notification adapter, or a web server. Task
+support is advertised only when a complete durable store and runner are
+configured. Task polling remains available without a notification adapter; a
+listen request then acknowledges an empty task set.
+
+## Server example
+
+```elixir
+defmodule Example.Tools.Echo do
+  use TamaMCP.Tool, task: :disabled, scopes: ["example.echo"]
+
+  input_schema do
+    field(:message, :string, required: true, min_length: 1)
+  end
+
+  output_schema do
+    field(:message, :string, required: true)
+  end
+
+  @impl true
+  def call(%{"message" => message}, _context) do
+    {:ok,
+     TamaMCP.Response.success(
+       content: [TamaMCP.Response.text(message)],
+       structured_content: %{"message" => message}
+     )}
+  end
+end
+
+defmodule Example.Server do
+  use TamaMCP.Server, name: "example", version: "1.0.0"
+
+  tool(Example.Tools.Echo, name: "echo")
+end
+```
+
+Mount the transport with authorization and cache adapters:
+
+```elixir
+forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
+  server: Example.Server,
+  authorization: Example.Authorization,
+  cache: Example.Cache,
+  context_headers: ["x-request-id"]
+```
+
+The authorization adapter implements the
+`c:TamaMCP.Authorization.authenticate/2` callback and returns a
+`TamaMCP.Authorization.Decision`. The decision carries the
+authenticated principal, owner key, claims, granted scopes, credential expiry,
+and explicit application assigns. Authentication runs before transport
+validation on every HTTP request. Long-lived streams additionally use
+`c:TamaMCP.Authorization.reauthorize/3`; adapters may register an immediate
+policy signal with `c:TamaMCP.Authorization.register_invalidation/3`.
+
+## Durable tasks
+
+A tool declares `task: :required` or `task: :optional` in `use TamaMCP.Tool`.
+Task-capable transports configure both application-owned adapters:
+
+```elixir
+forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
+  server: Example.Server,
+  authorization: Example.Authorization,
+  cache: Example.Cache,
+  task_store: Example.TaskStore,
+  task_store_options: [repo: Example.Repo],
+  task_runner: Example.TaskRunner,
+  task_runner_options: [supervisor: Example.TaskSupervisor]
+```
+
+The runner's `c:TamaMCP.Task.Runner.start/4` callback is the atomic durability
+boundary: before returning a task handle it must persist a `TamaMCP.Task` and
+accept its execution handoff. `TamaMCP.Task.Store` owns owner-bound lookup,
+compare-and-update transitions, atomic one-time acceptance of outstanding input
+responses, and durable idempotent cooperative-cancellation intent. Store
+notifications and worker signals occur only after their corresponding state
+commit; no-op input and cancellation replays do not signal workers. The default
+UTC clock and opaque UUID generator can be replaced for application or test
+needs. Optional tools remain synchronous unless `:task_selector` explicitly
+selects durable execution; task-disabled tools do not consult the selector.
+
+The cache adapter implements `TamaMCP.Cache`. TamaMCP compiles tool validators
+while compiling each tool module, precompiles its fixed protocol validators,
+embeds their serialized artifacts, and owns versioned cache keys and
+restoration. The host adapter owns storage, concurrency, expiry, distribution,
+and any additional serialization required by its cache engine. Cached validator
+values are opaque Erlang terms and may contain functions.
+
+## Task subscriptions
+
+Configure a `TamaMCP.Notification` alongside the durable task adapters to
+accept task IDs on `subscriptions/listen`. The package includes
+`TamaMCP.Notification.Local` for tests and single-node development:
+
+```elixir
+children = [
+  {TamaMCP.Notification.Local, name: Example.Notification}
+]
+
+forward "/mcp", TamaMCP.Transport.StreamableHTTP.Plug,
+  server: Example.Server,
+  authorization: Example.Authorization,
+  cache: Example.Cache,
+  task_store: Example.TaskStore,
+  task_runner: Example.TaskRunner,
+  notification: TamaMCP.Notification.Local,
+  notification_options: [server: Example.Notification]
+```
+
+After a visible task transition commits, application-owned store or runner
+code calls `TamaMCP.Notification.publish_committed/2` with the committed
+task and the task-store options supplied by TamaMCP. Publication is a lossy
+hint: failure never rolls back the task. Streams reauthorize before delivery
+and while idle, close at credential expiry or their configured lifetime, and
+close slow consumers when their bounded queue overflows. Clients reconcile
+every interruption with owner-bound `tasks/get`; Phase 3 provides no replay or
+resumable SSE log.
+
+## Conformance
+
+`TamaMCP.Conformance` validates complete core and Tasks requests and responses
+against the immutable upstream schemas in
+`priv/protocol/2026-07-28`. Its bundled wire fixtures exercise discovery,
+authorization-aware listing, synchronous and task creation results, task
+lookup/update/cancellation, tool errors, malformed metadata, scope denial,
+standard and schema-declared header agreement, unsupported versions, explicit
+null output, output-schema failure, and rejection of protocol sessions. The
+task set contains 23 HTTP fixtures and 11 static task-profile fixtures covering
+all five states, invalid cross-state payloads, recovery, capability and owner
+denials, cancellation races, and unsupported task methods. Successful task
+responses validate the complete JSON-RPC envelope independently from the nested
+Tasks result.
+
+The subscription set adds seven deterministic JSON/SSE fixtures for
+acknowledgement, authorized delivery, reconnect, capability denial, credential
+expiry, policy invalidation, and overflow. `TamaMCP.Conformance` compares
+ordered SSE events and validates each event against the pinned core and Tasks
+schemas.
+
+Host applications can call `TamaMCP.Conformance.validate/3` for individual
+values, `TamaMCP.Conformance.validate_schema_fixtures/3` for the static task
+profile, or `TamaMCP.Conformance.run/3` with a request callback, their cache
+adapter, and an application fixture set. Task HTTP fixtures may include bounded
+setup metadata that an application contract adapter uses to prepare the
+required durable state before issuing the wire request.
 
 ## Dependencies
 
 - `jason` encodes and decodes JSON.
 - `plug` provides the framework-neutral HTTP boundary.
-- `jsonschex` validates JSON Schema Draft 2020-12 tool contracts.
+- `jsonschex` validates JSON Schema Draft 2020-12 tool and protocol contracts.
 - `tama_oauth` supplies OAuth and protected-resource protocol primitives.
 - `telemetry` exposes bounded runtime instrumentation.
 
 The library deliberately does not depend on Phoenix, Ecto, Bandit, Cowboy,
-Anubis MCP, or ex_mcp.
+Anubis MCP, ex_mcp, or a validator cache engine.
 
 ## Installation
 

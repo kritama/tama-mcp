@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify, tag, and publish release
+    if: github.repository == 'kritama/tama-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: hex
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.tag.outputs.published }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up BEAM
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: mise.toml
+          version-type: strict
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Audit Hex dependencies
+        run: mix hex.audit
+
+      - name: Run package checks
+        run: mix precommit
+
+      - name: Build Dialyzer PLT
+        run: mix dialyzer --plt
+
+      - name: Run Dialyzer
+        run: mix dialyzer --no-check
+
+      - name: Build documentation
+        run: mix docs
+
+      - name: Build Hex package
+        run: mix hex.build
+
+      - name: Tag release
+        id: tag
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        shell: bash
+        run: |
+          version="$(mix run --no-compile --no-start -e 'IO.write(Mix.Project.config()[:version])')"
+          tag="v${version}"
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists; not a release push."
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if ! grep -qE "^## \[.*${version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no ${version} section. Finalize the release branch changelog before merging to main."
+            exit 1
+          fi
+
+          if [[ -z "${HEX_API_KEY}" ]]; then
+            echo "::error::HEX_API_KEY is not configured in the hex environment"
+            exit 1
+          fi
+
+          git tag "${tag}"
+          git push origin "${tag}"
+          {
+            echo "published=true"
+            echo "version=${version}"
+            echo "tag=${tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Create deployment
+        id: deployment
+        if: steps.tag.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          deployment_id="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/deployments" \
+            -f ref="${{ steps.tag.outputs.tag }}" \
+            -f environment='hex' \
+            -f auto_merge=false \
+            -f required_contexts='[]' \
+            --jq '.id')"
+
+          gh api "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses" \
+            -f state=in_progress \
+            -f description="Publishing v${{ steps.tag.outputs.version }} to Hex"
+
+          echo "deployment_id=${deployment_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish package and documentation
+        id: publish
+        if: steps.tag.outputs.published == 'true'
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes
+
+      - name: Create GitHub release
+        id: release
+        if: steps.tag.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          notes="$(awk -v ver="${{ steps.tag.outputs.version }}" '
+            index($0, "## [") == 1 && index($0, "[" ver "]") > 0 {found=1; next}
+            found && /^## / {exit}
+            found {print}
+          ' CHANGELOG.md)"
+
+          if [[ -z "${notes}" ]]; then
+            notes="Release ${{ steps.tag.outputs.tag }}"
+          fi
+
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --target "$(git rev-parse HEAD)" \
+            --notes-file <(printf '%s\n' "${notes}")
+
+      - name: Finalize deployment
+        if: always() && steps.tag.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.publish.outcome }}" == "success" && "${{ steps.release.outcome }}" == "success" ]]; then
+            state=success
+            description="Published v${{ steps.tag.outputs.version }} to Hex"
+          else
+            state=failure
+            description="Publishing v${{ steps.tag.outputs.version }} to Hex failed"
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/deployments/${{ steps.deployment.outputs.deployment_id }}/statuses" \
+            -f state="${state}" \
+            -f description="${description}" \
+            -f environment_url="https://hex.pm/packages/tama_mcp/${{ steps.tag.outputs.version }}"
