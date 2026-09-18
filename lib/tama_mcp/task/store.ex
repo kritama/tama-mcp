@@ -72,6 +72,33 @@ defmodule TamaMCP.Task.Store do
   `TamaMCP.Notification.publish_committed/2` with the committed task and
   these store options. Publication is deliberately outside the transaction;
   failure does not roll back the task and clients recover through `tasks/get`.
+
+  ## Validation profiles
+
+  The `:task_validation_options` entry contains package-owned limits and
+  host-owned module references. A durable adapter persists only the
+  package-owned profile so later or cross-node transitions apply the same
+  effective limits:
+
+      case TamaMCP.Task.ValidationProfile.from_options(
+             Keyword.fetch!(options[:tama_mcp], :task_validation_options)
+           ) do
+        {:ok, profile} ->
+          # Persist TamaMCP.Task.ValidationProfile.encode(profile) with the
+          # task, then validate and transition with the reconstructed options:
+          #
+          # TamaMCP.Task.ValidationProfile.options(profile,
+          #   cache: MyCache, cache_options: cache_options, tool: MyTool
+          # )
+
+        {:error, :invalid_profile} ->
+          {:error, TamaMCP.Error.internal()}
+      end
+
+  The profile is the only serializable part of the validation options. The
+  cache module, cache options, and originating tool module are resolved by
+  the host from its own configuration and allowlist at reconstruction time
+  and are never persisted by the package.
   """
 
   alias TamaMCP.{Error, Task}
