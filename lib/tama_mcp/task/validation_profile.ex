@@ -36,7 +36,7 @@ defmodule TamaMCP.Task.ValidationProfile do
   defaults from it.
   """
 
-  alias TamaMCP.JSON
+  alias TamaMCP.Task.ValidationProfile.Limits
 
   @version 1
 
@@ -84,13 +84,13 @@ defmodule TamaMCP.Task.ValidationProfile do
   """
   @spec from_options(keyword()) :: {:ok, t()} | {:error, :invalid_profile}
   def from_options(options) when is_list(options) do
-    with {:ok, max_status_message_bytes} <- bound(options[:max_status_message_bytes]),
-         {:ok, max_task_ttl_ms} <- bound(options[:max_task_ttl_ms]),
+    with {:ok, max_status_message_bytes} <- Limits.bound(options[:max_status_message_bytes]),
+         {:ok, max_task_ttl_ms} <- Limits.bound(options[:max_task_ttl_ms]),
          {:ok, max_input_request_keys_per_task} <-
-           bound(options[:max_input_request_keys_per_task]),
-         {:ok, max_result_bytes} <- bound(options[:max_result_bytes]),
-         {:ok, max_error_data_bytes} <- bound(options[:max_error_data_bytes]),
-         {:ok, result_metadata} <- metadata(options[:result_metadata]) do
+           Limits.bound(options[:max_input_request_keys_per_task]),
+         {:ok, max_result_bytes} <- Limits.bound(options[:max_result_bytes]),
+         {:ok, max_error_data_bytes} <- Limits.bound(options[:max_error_data_bytes]),
+         {:ok, result_metadata} <- Limits.metadata(options[:result_metadata]) do
       {
         :ok,
         %__MODULE__{
@@ -148,12 +148,12 @@ defmodule TamaMCP.Task.ValidationProfile do
       )
       when map_size(map) == 7 do
     with true <- version == @version,
-         {:ok, max_status_message_bytes} <- bound(max_status_message_bytes),
-         {:ok, max_task_ttl_ms} <- bound(max_task_ttl_ms),
-         {:ok, max_input_request_keys_per_task} <- bound(max_input_request_keys_per_task),
-         {:ok, max_result_bytes} <- bound(max_result_bytes),
-         {:ok, max_error_data_bytes} <- bound(max_error_data_bytes),
-         {:ok, result_metadata} <- metadata(result_metadata) do
+         {:ok, max_status_message_bytes} <- Limits.bound(max_status_message_bytes),
+         {:ok, max_task_ttl_ms} <- Limits.bound(max_task_ttl_ms),
+         {:ok, max_input_request_keys_per_task} <- Limits.bound(max_input_request_keys_per_task),
+         {:ok, max_result_bytes} <- Limits.bound(max_result_bytes),
+         {:ok, max_error_data_bytes} <- Limits.bound(max_error_data_bytes),
+         {:ok, result_metadata} <- Limits.metadata(result_metadata) do
       {
         :ok,
         %__MODULE__{
@@ -197,9 +197,9 @@ defmodule TamaMCP.Task.ValidationProfile do
     ]
 
     with true <- Keyword.has_key?(resolution, :cache),
-         {:ok, cache} <- module(resolution[:cache]),
-         {:ok, cache_options} <- keyword(Keyword.get(resolution, :cache_options, [])),
-         {:ok, tool} <- optional_module(Keyword.get(resolution, :tool)) do
+         {:ok, cache} <- Limits.module(resolution[:cache]),
+         {:ok, cache_options} <- Limits.keyword(Keyword.get(resolution, :cache_options, [])),
+         {:ok, tool} <- Limits.optional_module(Keyword.get(resolution, :tool)) do
       options =
         base
         |> Keyword.put(:cache, cache)
@@ -212,38 +212,4 @@ defmodule TamaMCP.Task.ValidationProfile do
   end
 
   def options(_profile, _resolution), do: {:error, :invalid_resolution}
-
-  @doc false
-  @spec bound(term()) :: {:ok, pos_integer()} | {:error, :invalid_bound}
-  defp bound(value) when is_integer(value) and value > 0, do: {:ok, value}
-  defp bound(_value), do: {:error, :invalid_bound}
-
-  @doc false
-  @spec metadata(term()) :: {:ok, map()} | {:error, :invalid_metadata}
-  defp metadata(nil), do: {:ok, %{}}
-
-  defp metadata(value) when is_map(value) do
-    if JSON.value?(value), do: {:ok, value}, else: {:error, :invalid_metadata}
-  end
-
-  defp metadata(_value), do: {:error, :invalid_metadata}
-
-  @doc false
-  @spec module(term()) :: {:ok, atom()} | {:error, :invalid_module}
-  defp module(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
-  defp module(_value), do: {:error, :invalid_module}
-
-  @doc false
-  @spec optional_module(term()) :: {:ok, atom() | nil} | {:error, :invalid_module}
-  defp optional_module(nil), do: {:ok, nil}
-  defp optional_module(value) when is_atom(value), do: {:ok, value}
-  defp optional_module(_value), do: {:error, :invalid_module}
-
-  @doc false
-  @spec keyword(term()) :: {:ok, keyword()} | {:error, :invalid_keyword}
-  defp keyword(value) when is_list(value) do
-    if Keyword.keyword?(value), do: {:ok, value}, else: {:error, :invalid_keyword}
-  end
-
-  defp keyword(_value), do: {:error, :invalid_keyword}
 end
