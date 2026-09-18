@@ -41,13 +41,14 @@ defmodule TamaMCP.Conformance.Failure do
     value |> inspect(limit: 40) |> truncate()
   end
 
-  defp truncate(value) when byte_size(value) <= 512, do: value
-
   defp truncate(value) do
-    value
-    |> String.replace_invalid("")
-    |> truncate_to_bytes(509)
-    |> Kernel.<>("...")
+    value = String.replace_invalid(value, "")
+
+    if byte_size(value) <= 512 do
+      value
+    else
+      truncate_to_bytes(value, 509) <> "..."
+    end
   end
 
   defp truncate_to_bytes(value, budget) when byte_size(value) <= budget, do: value

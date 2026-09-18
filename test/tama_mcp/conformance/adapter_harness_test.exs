@@ -727,6 +727,36 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
     assert byte_size(message) < 800
   end
 
+  test "failure messages truncate multibyte details by bytes and stay valid UTF-8" do
+    multibyte = String.duplicate("é", 600)
+
+    message =
+      Exception.message(
+        Failure.exception(
+          callback: "cancel/3",
+          rule: "terminal cancels must fail",
+          details: multibyte
+        )
+      )
+
+    assert String.valid?(message)
+    assert byte_size(message) < 800
+
+    invalid = <<0xFF, 0xFE>> <> String.duplicate("y", 600)
+
+    message =
+      Exception.message(
+        Failure.exception(
+          callback: "cancel/3",
+          rule: "terminal cancels must fail",
+          details: invalid
+        )
+      )
+
+    assert String.valid?(message)
+    assert byte_size(message) < 800
+  end
+
   test "the store harness reports an adapter exception with the callback and rule" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
