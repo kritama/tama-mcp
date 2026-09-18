@@ -89,8 +89,11 @@ defmodule TamaMCP.Task.Store do
   Decode the columns back with `TamaMCP.Error.decode/1` and
   `TamaMCP.RequestID.decode/1` before reconstructing the task. `Error.decode/1`
   accepts a JSON null for an absent error; `RequestID.decode/1` requires a
-  tagged map because task payloads always carry a request ID. Both accept
-  only bounded, JSON-safe input and never create atoms from persisted data.
+  tagged map because task payloads always carry a request ID. String request
+  IDs are bounded by `RequestID.max_string_bytes/0` while integer request IDs
+  are unrestricted. Both codecs accept only JSON-safe input and never create
+  atoms from persisted data.
+
   ## Validation profiles
 
   The `:task_validation_options` entry contains package-owned limits and
