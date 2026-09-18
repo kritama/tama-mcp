@@ -41,15 +41,6 @@ defmodule TamaMCP.RequestID do
   def encode(id) when is_integer(id), do: %{"type" => "integer", "value" => id}
 
   @doc """
-  Decodes a tagged request ID map produced by `encode/1`.
-
-  `nil` is rejected because persisted task payloads always carry a request
-  ID. Untagged values, booleans, floats, objects, and arrays fail closed, as
-  do tagged maps with an unknown tag, a value whose type does not match the
-  tag, an invalid UTF-8 string, atom keys, or extra keys. Decoding never
-  creates atoms from persisted input.
-  """
-  @doc """
   The maximum byte size of a string request ID.
 
   Task validation, persistence encoding, and `decode/1` all apply this bound
@@ -59,6 +50,15 @@ defmodule TamaMCP.RequestID do
   @spec max_string_bytes() :: pos_integer()
   def max_string_bytes, do: @max_string_bytes
 
+  @doc """
+  Decodes a tagged request ID map produced by `encode/1`.
+
+  `nil` is rejected because persisted task payloads always carry a request
+  ID. Untagged values, booleans, floats, objects, and arrays fail closed, as
+  do tagged maps with an unknown tag, a value whose type does not match the
+  tag, an invalid UTF-8 string, atom keys, or extra keys. Decoding never
+  creates atoms from persisted input.
+  """
   @spec decode(map() | nil) :: {:ok, id()} | {:error, :invalid_request_id}
   def decode(nil), do: {:error, :invalid_request_id}
 
