@@ -111,10 +111,15 @@ defmodule TamaMCP.RequestIDTest do
     end
 
     test "never creates atoms from persisted input" do
-      assert {:ok, value} =
-               RequestID.decode(%{"type" => "string", "value" => "a brand new value"})
+      unique = "a brand new value #{System.unique_integer([:positive])}"
+
+      assert {:ok, value} = RequestID.decode(%{"type" => "string", "value" => unique})
 
       assert is_binary(value)
+
+      assert_raise(ArgumentError, fn ->
+        String.to_existing_atom(value)
+      end)
     end
   end
 end
