@@ -32,6 +32,35 @@ defmodule TamaMCP.Task.Store do
   durable worker only after that commit. A request that accepts no new response
   must not signal the worker.
 
+  Use `TamaMCP.Task.InputResponses.plan/3` to classify the incoming responses
+  against the validated task and the host's recorded response history, commit
+  the returned plan inside the store's transaction, and signal the worker only
+  after commit:
+
+      case TamaMCP.Task.InputResponses.plan(task, recorded, input_responses) do
+        {:ok, %TamaMCP.Task.InputResponses.Plan{no_op: true}} ->
+          # No new response accepted: do not advance the revision or
+          # signal the worker.
+          :ok
+
+        {:ok, %TamaMCP.Task.InputResponses.Plan{} = plan} ->
+          with {:ok, updated} <-
+                 Task.transition(
+                   task,
+                   :input_required,
+                   %{input_requests: plan.remaining, last_updated_at: next_updated_at},
+                   validation_options
+                 ) do
+            # Commit `updated` and `plan.recorded` atomically, then
+            # signal the durable worker.
+          end
+
+        {:error, reason} ->
+          # Map `:invalid_state` and `:invalid_input` to the callback's
+          # bounded error terms.
+          {:error, reason}
+      end
+
   `cancel/3` must atomically and idempotently record cooperative cancellation
   intent on a non-terminal task. It does not transition the task to
   `cancelled`, and it must not overwrite a terminal state that wins the race.
