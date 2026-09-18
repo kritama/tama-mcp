@@ -89,9 +89,14 @@ defmodule TamaMCP.Task.Validation do
 
   defp check(validation, {:binary_or_integer, field, max_bytes}) do
     case value(validation, field) do
-      binary when is_binary(binary) -> byte_size(binary) <= max_bytes
-      integer when is_integer(integer) -> true
-      _other -> false
+      binary when is_binary(binary) ->
+        String.valid?(binary) and byte_size(binary) <= max_bytes
+
+      integer when is_integer(integer) ->
+        true
+
+      _other ->
+        false
     end
   end
 

@@ -17,7 +17,7 @@ defmodule TamaMCP.RequestID do
   is a value `decode/1` can persist and recover.
 
       iex> TamaMCP.RequestID.encode(42)
-      %{"type" => "integer", "value" => 42}
+      {:ok, %{"type" => "integer", "value" => 42}}
       iex> TamaMCP.RequestID.decode(%{"type" => "integer", "value" => 42})
       {:ok, 42}
       iex> TamaMCP.RequestID.decode(%{"type" => "string", "value" => "42"})
@@ -35,10 +35,21 @@ defmodule TamaMCP.RequestID do
 
   The `type` tag preserves the exact protocol type so the decoded value is
   never coerced across string and integer identity.
+
+  String IDs must be valid UTF-8 within `max_string_bytes/0`, the same
+  bounds task validation and `decode/1` apply; anything else, including
+  values that are not strings or integers, fails closed with
+  `{:error, :invalid_request_id}`. Any integer is accepted.
   """
-  @spec encode(id()) :: map()
-  def encode(id) when is_binary(id), do: %{"type" => "string", "value" => id}
-  def encode(id) when is_integer(id), do: %{"type" => "integer", "value" => id}
+  @spec encode(id()) :: {:ok, map()} | {:error, :invalid_request_id}
+  def encode(id) when is_binary(id) do
+    if String.valid?(id) and byte_size(id) <= @max_string_bytes,
+      do: {:ok, %{"type" => "string", "value" => id}},
+      else: {:error, :invalid_request_id}
+  end
+
+  def encode(id) when is_integer(id), do: {:ok, %{"type" => "integer", "value" => id}}
+  def encode(_id), do: {:error, :invalid_request_id}
 
   @doc """
   The maximum byte size of a string request ID.

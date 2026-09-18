@@ -79,15 +79,18 @@ defmodule TamaMCP.Task.Store do
   codecs so decoding is lossless and fails closed. An error may be absent,
   which hosts store as a null column; the request ID is always present:
 
+      {:ok, request_id} = TamaMCP.RequestID.encode(task.request_id)
+
       %{
         "error" => if(task.error, do: TamaMCP.Error.encode(task.error), else: nil),
-        "request_id" => TamaMCP.RequestID.encode(task.request_id)
+        "request_id" => request_id
       }
 
   Decode the columns back with `TamaMCP.Error.decode/1` and
-  `TamaMCP.RequestID.decode/1` before reconstructing the task. Both decoders
-  accept only bounded, JSON-safe maps and never create atoms from persisted
-  input.
+  `TamaMCP.RequestID.decode/1` before reconstructing the task. `Error.decode/1`
+  accepts a JSON null for an absent error; `RequestID.decode/1` requires a
+  tagged map because task payloads always carry a request ID. Both accept
+  only bounded, JSON-safe input and never create atoms from persisted data.
   ## Validation profiles
 
   The `:task_validation_options` entry contains package-owned limits and

@@ -14,9 +14,11 @@ The project follows Semantic Versioning and uses Conventional Commits.
   `TamaMCP.Error.encode/2` for durable error persistence, and
   `TamaMCP.RequestID.encode/1` / `TamaMCP.RequestID.decode/1`, tagged
   persistence codecs that preserve JSON-RPC request-ID string versus integer
-  identity. Both decoders operate only on JSON-safe maps, fail closed on
+  identity. Both codecs operate only on JSON-safe values, fail closed on
   malformed or oversized input, and never create atoms from persisted data.
-  String request IDs are bounded by the shared
+  `TamaMCP.Error.decode/1` accepts a JSON null for an absent error, while
+  `TamaMCP.RequestID.decode/1` requires a tagged map because task payloads
+  always carry a request ID. String request IDs are bounded by the shared
   `TamaMCP.RequestID.max_string_bytes/0` limit, which task validation enforces
   so every created task round-trips through the persistence codecs.
 - Added `TamaMCP.Notification.Buffer`, a pure, revision-aware, bounded

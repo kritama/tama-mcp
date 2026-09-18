@@ -7,10 +7,26 @@ defmodule TamaMCP.RequestIDTest do
 
   describe "encode/1" do
     test "tags string and integer identity" do
-      assert RequestID.encode("42") == %{"type" => "string", "value" => "42"}
-      assert RequestID.encode(42) == %{"type" => "integer", "value" => 42}
-      assert RequestID.encode("") == %{"type" => "string", "value" => ""}
-      assert RequestID.encode(0) == %{"type" => "integer", "value" => 0}
+      assert {:ok, %{"type" => "string", "value" => "42"}} = RequestID.encode("42")
+      assert {:ok, %{"type" => "integer", "value" => 42}} = RequestID.encode(42)
+      assert {:ok, %{"type" => "string", "value" => ""}} = RequestID.encode("")
+      assert {:ok, %{"type" => "integer", "value" => 0}} = RequestID.encode(0)
+    end
+
+    test "rejects values that cannot round-trip through decode/1" do
+      for id <- [
+            <<0xFF, 0xFE, "id">>,
+            String.duplicate("a", RequestID.max_string_bytes() + 1),
+            nil,
+            true,
+            42.0,
+            ["42"]
+          ] do
+        assert {:error, :invalid_request_id} = RequestID.encode(id)
+      end
+
+      boundary = String.duplicate("a", RequestID.max_string_bytes())
+      assert {:ok, %{"value" => ^boundary}} = RequestID.encode(boundary)
     end
 
     test "encodes protocol boundary integers exactly" do
@@ -26,7 +42,8 @@ defmodule TamaMCP.RequestIDTest do
       ]
 
       for id <- boundary do
-        assert {:ok, ^id} = RequestID.decode(RequestID.encode(id))
+        assert {:ok, encoded} = RequestID.encode(id)
+        assert {:ok, ^id} = RequestID.decode(encoded)
       end
     end
   end
