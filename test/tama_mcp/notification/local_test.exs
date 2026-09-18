@@ -68,9 +68,12 @@ defmodule TamaMCP.Notification.LocalTest do
 
     assert {:ok, subscription} = Local.subscribe([first.id, second.id], self(), 1, options)
     assert :ok = Local.publish(first, options)
+
+    # Drain the first publication so the second reservation is evaluated
+    # against the occupied queue instead of racing the same drain cycle.
+    assert_receive {Notification, ^subscription, :ready}
     assert :ok = Local.publish(second, options)
 
-    assert_receive {Notification, ^subscription, :ready}
     assert_receive {Notification, ^subscription, :overflow}
     assert {:error, :overflow} = Local.take(subscription, options)
     assert :ok = Local.unsubscribe(subscription, options)
