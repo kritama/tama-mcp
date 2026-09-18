@@ -32,6 +32,36 @@ defmodule TamaMCP.Task.Store do
   durable worker only after that commit. A request that accepts no new response
   must not signal the worker.
 
+  Use `TamaMCP.Task.InputResponses.plan/3` to classify the incoming responses
+  against the validated task and the host's recorded response history, commit
+  the returned plan inside the store's transaction, and signal the worker only
+  after commit:
+
+      case TamaMCP.Task.InputResponses.plan(task, recorded, input_responses) do
+        {:ok, %TamaMCP.Task.InputResponses.Plan{no_op: true}} ->
+          # No new response accepted: do not advance the revision or
+          # signal the worker.
+          :ok
+
+        {:ok, %TamaMCP.Task.InputResponses.Plan{} = plan} ->
+          with {:ok, updated} <-
+                 Task.transition(
+                   task,
+                   :input_required,
+                   %{input_requests: plan.remaining, last_updated_at: next_updated_at},
+                   validation_options
+                 ) do
+            # Commit `updated` and `plan.recorded` atomically, then
+            # signal the durable worker.
+          end
+
+        {:error, reason} ->
+          # Return the planner's bounded terms unchanged: `:invalid_state`
+          # when the task cannot accept responses and `:invalid_input` when
+          # the incoming map is not a string-keyed JSON object.
+          {:error, reason}
+      end
+
   `cancel/3` must atomically and idempotently record cooperative cancellation
   intent on a non-terminal task. It does not transition the task to
   `cancelled`, and it must not overwrite a terminal state that wins the race.
@@ -50,7 +80,7 @@ defmodule TamaMCP.Task.Store do
   @type options :: keyword()
   @type lookup_error :: :not_found | Error.t()
   @type mutation_error ::
-          :not_found | :conflict | :invalid_state | :invalid_task | Error.t()
+          :not_found | :conflict | :invalid_state | :invalid_task | :invalid_input | Error.t()
 
   @callback create(Task.t(), options()) ::
               {:ok, Task.t()} | {:error, :conflict | Error.t()}

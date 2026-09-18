@@ -81,6 +81,30 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.FaultyStore do
   end
 end
 
+defmodule TamaMCP.Transport.StreamableHTTP.TasksTest.InvalidInputStore do
+  @moduledoc false
+
+  @behaviour TamaMCP.Task.Store
+
+  alias TamaMCP.TestSupport.Tasks.Store
+
+  @impl true
+  def create(task, options), do: Store.create(task, options)
+
+  @impl true
+  def get(owner_key, task_id, options), do: Store.get(owner_key, task_id, options)
+
+  @impl true
+  def transition(owner_key, task_id, revision, status, attributes, options),
+    do: Store.transition(owner_key, task_id, revision, status, attributes, options)
+
+  @impl true
+  def update(_owner_key, _task_id, _responses, _options), do: {:error, :invalid_input}
+
+  @impl true
+  def cancel(owner_key, task_id, options), do: Store.cancel(owner_key, task_id, options)
+end
+
 defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   @moduledoc false
 
@@ -92,6 +116,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
   alias TamaMCP.TestSupport.Tasks.Store
   alias TamaMCP.Transport.StreamableHTTP.Plug, as: MCPPlug
   alias TamaMCP.Transport.StreamableHTTP.Runtime
+  alias TamaMCP.Transport.StreamableHTTP.TasksTest.InvalidInputStore
 
   @version Protocol.version()
   @missing_capability Protocol.error_code(:missing_required_client_capability)
@@ -389,6 +414,43 @@ defmodule TamaMCP.Transport.StreamableHTTP.TasksTest do
 
     assert missing.status == 400
     assert get_in(decode(missing), ["error", "message"]) == "Task was not found"
+  end
+
+  test "a store that rejects non-JSON-safe responses surfaces as invalid params", %{
+    store: store
+  } do
+    runtime = runtime(store, self(), task_store: InvalidInputStore)
+    task = create_task(runtime)
+
+    store_options = Runtime.effective_task_store_options(runtime)
+
+    assert {:ok, waiting} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :input_required,
+               %{
+                 input_requests: %{"approval" => elicitation_request()},
+                 last_updated_at: @later
+               },
+               store_options
+             )
+
+    conn =
+      post(
+        runtime,
+        Protocol.method(:tasks_update),
+        %{"taskId" => waiting.id, "inputResponses" => %{"approval" => %{"action" => "submit"}}},
+        name: waiting.id
+      )
+
+    assert conn.status == 400
+    assert get_in(decode(conn), ["error", "code"]) == @invalid_params
+    assert get_in(decode(conn), ["error", "message"]) =~ "inputResponses"
+    refute decode(conn)["result"]
+
+    assert {:ok, ^waiting} = Store.get(task.owner_key, task.id, store_options)
   end
 
   test "store rejects input requests unsupported by the originating client", %{

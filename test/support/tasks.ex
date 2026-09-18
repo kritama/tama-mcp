@@ -24,6 +24,7 @@ defmodule TamaMCP.TestSupport.Tasks.Store do
   @behaviour TamaMCP.Task.Store
 
   alias TamaMCP.Task
+  alias TamaMCP.Task.{InputResponses, InputResponses.Plan}
 
   @input_responses :tama_mcp_test_input_responses
 
@@ -152,34 +153,33 @@ defmodule TamaMCP.TestSupport.Tasks.Store do
     response_key = responses_key(task.owner_key, task.id)
     answered = Map.get(tasks, response_key, %{})
 
-    accepted =
-      input_responses
-      |> Map.take(Map.keys(task.input_requests))
-      |> Map.drop(Map.keys(answered))
+    case InputResponses.plan(task, answered, input_responses) do
+      {:ok, %Plan{no_op: true}} ->
+        {{:ok, %{}}, tasks}
 
-    if map_size(accepted) == 0 do
-      {{:ok, %{}}, tasks}
-    else
-      remaining = Map.drop(task.input_requests, Map.keys(accepted))
-      validation_options = validation_options(options)
+      {:ok, %Plan{} = plan} ->
+        validation_options = validation_options(options)
 
-      case Task.transition(
-             task,
-             :input_required,
-             %{input_requests: remaining, last_updated_at: next_updated_at(task)},
-             validation_options
-           ) do
-        {:ok, updated} ->
-          updated_tasks =
-            tasks
-            |> Map.put(key, updated)
-            |> Map.put(response_key, Map.merge(answered, accepted))
+        case Task.transition(
+               task,
+               :input_required,
+               %{input_requests: plan.remaining, last_updated_at: next_updated_at(task)},
+               validation_options
+             ) do
+          {:ok, updated} ->
+            updated_tasks =
+              tasks
+              |> Map.put(key, updated)
+              |> Map.put(response_key, plan.recorded)
 
-          {{:ok, accepted}, updated_tasks}
+            {{:ok, plan.accepted}, updated_tasks}
 
-        {:error, reason} ->
-          {{:error, reason}, tasks}
-      end
+          {:error, reason} ->
+            {{:error, reason}, tasks}
+        end
+
+      {:error, reason} ->
+        {{:error, reason}, tasks}
     end
   end
 
