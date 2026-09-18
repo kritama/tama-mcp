@@ -10,6 +10,13 @@ The project follows Semantic Versioning and uses Conventional Commits.
 
 - Added object and nullable field composition, nested object declarations, and
   bounded named output variants to the compile-time Tool schema DSL.
+- Added `TamaMCP.Notification.Buffer`, a pure, revision-aware, bounded
+  notification buffer. A newer pending revision replaces the queued snapshot
+  without consuming capacity, equal or older revisions are ignored, capacity
+  counts distinct pending task IDs, and crossing capacity is a single terminal
+  overflow that drops retained content. `TamaMCP.Notification.Local` now keeps
+  each subscription queue in this shared primitive, and the Notification
+  contract documents the ownership split for clustered routing adapters.
 
 ## [0.1.1] (2026-09-17)
 
