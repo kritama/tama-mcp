@@ -79,4 +79,89 @@ defmodule TamaMCP.ErrorTest do
     assert TamaMCP.Error.reason(error) == :unknown
     assert TamaMCP.Error.status(error) == 500
   end
+
+  describe "decode/1" do
+    test "decodes nil as an explicit absent error" do
+      assert {:ok, nil} = TamaMCP.Error.decode(nil)
+      assert {:ok, nil} = TamaMCP.Error.decode(nil, 16)
+    end
+
+    test "round-trips every constructor without data" do
+      errors = [
+        TamaMCP.Error.parse(),
+        TamaMCP.Error.invalid_request("invalid"),
+        TamaMCP.Error.method_not_found("missing"),
+        TamaMCP.Error.invalid_params("invalid params"),
+        TamaMCP.Error.internal(),
+        TamaMCP.Error.header_mismatch("mismatch")
+      ]
+
+      for error <- errors do
+        assert {:ok, ^error} = TamaMCP.Error.decode(TamaMCP.Error.encode(error))
+      end
+    end
+
+    test "round-trips bounded JSON-safe data" do
+      capability = %{"extensions" => %{TamaMCP.Protocol.tasks_extension() => %{}}}
+      missing = TamaMCP.Error.missing_required_client_capability(capability)
+      assert {:ok, ^missing} = TamaMCP.Error.decode(TamaMCP.Error.encode(missing))
+
+      unsupported = TamaMCP.Error.unsupported_protocol_version("old")
+      assert {:ok, ^unsupported} = TamaMCP.Error.decode(TamaMCP.Error.encode(unsupported))
+
+      direct = %TamaMCP.Error{code: -32_603, message: "failure", data: %{"list" => [1, "two"]}}
+      assert {:ok, ^direct} = TamaMCP.Error.decode(TamaMCP.Error.encode(direct))
+    end
+
+    test "round-trips a 512-byte message" do
+      message = String.duplicate("m", 512)
+      error = %TamaMCP.Error{code: -32_603, message: message}
+      assert {:ok, ^error} = TamaMCP.Error.decode(TamaMCP.Error.encode(error))
+    end
+
+    test "rejects malformed error maps" do
+      valid = TamaMCP.Error.encode(TamaMCP.Error.internal())
+
+      for encoded <- [
+            %{},
+            %{"code" => -32_603},
+            %{"message" => "failure"},
+            %{"code" => "-32603", "message" => "failure"},
+            %{"code" => -32_603.0, "message" => "failure"},
+            %{"code" => true, "message" => "failure"},
+            %{"code" => nil, "message" => "failure"},
+            %{"code" => -32_603, "message" => nil},
+            %{"code" => -32_603, "message" => ""},
+            %{"code" => -32_603, "message" => <<0xFF, 0xFE, "failure">>},
+            %{"code" => -32_603, "message" => String.duplicate("m", 513)},
+            Map.put(valid, "unexpected", true),
+            %{:code => -32_603, :message => "failure"}
+          ] do
+        assert {:error, :invalid_error} = TamaMCP.Error.decode(encoded)
+      end
+    end
+
+    test "rejects unsafe or non-object data" do
+      base = %{"code" => -32_603, "message" => "failure"}
+
+      for data <- [
+            ["an array"],
+            %{pid: self()},
+            %{"nested" => [make_ref()]},
+            %TamaMCP.TestSupport.Encodable{secret: "no"},
+            %{1 => "integer key"}
+          ] do
+        assert {:error, :invalid_error} = TamaMCP.Error.decode(Map.put(base, "data", data))
+      end
+    end
+
+    test "rejects data beyond the byte bound" do
+      base = %{"code" => -32_603, "message" => "failure"}
+      oversized = Map.put(base, "data", %{"detail" => String.duplicate("x", 100)})
+      assert {:error, :invalid_error} = TamaMCP.Error.decode(oversized, 16)
+
+      assert {:ok, %TamaMCP.Error{data: %{"detail" => _}}} =
+               TamaMCP.Error.decode(oversized, 8_192)
+    end
+  end
 end

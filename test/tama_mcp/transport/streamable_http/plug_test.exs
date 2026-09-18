@@ -904,6 +904,27 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
       assert %{"id" => "", "error" => %{"code" => @header_mismatch}} = decode(conn)
     end
 
+    test "rejects string request IDs beyond the shared byte bound", %{runtime: runtime} do
+      oversized = String.duplicate("a", TamaMCP.RequestID.max_string_bytes() + 1)
+
+      conn = post(runtime, Protocol.method(:server_discover), %{}, id: oversized)
+
+      assert conn.status == 400
+
+      assert %{
+               "error" => %{
+                 "code" => @invalid_request,
+                 "message" => "request ID exceeds the byte bound"
+               }
+             } = decode(conn)
+
+      boundary = String.duplicate("a", TamaMCP.RequestID.max_string_bytes())
+      conn = post(runtime, Protocol.method(:server_discover), %{}, id: boundary)
+
+      assert conn.status == 200
+      assert %{"id" => boundary, "result" => _} = decode(conn)
+    end
+
     test "fails closed when authorization rejects the request", %{runtime: runtime} do
       conn =
         post(runtime, Protocol.method(:server_discover), %{}, token: "bad")
