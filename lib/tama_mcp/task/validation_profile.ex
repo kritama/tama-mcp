@@ -213,9 +213,13 @@ defmodule TamaMCP.Task.ValidationProfile do
 
   def options(_profile, _resolution), do: {:error, :invalid_resolution}
 
+  @doc false
+  @spec bound(term()) :: {:ok, pos_integer()} | {:error, :invalid_bound}
   defp bound(value) when is_integer(value) and value > 0, do: {:ok, value}
   defp bound(_value), do: {:error, :invalid_bound}
 
+  @doc false
+  @spec metadata(term()) :: {:ok, map()} | {:error, :invalid_metadata}
   defp metadata(nil), do: {:ok, %{}}
 
   defp metadata(value) when is_map(value) do
@@ -224,13 +228,19 @@ defmodule TamaMCP.Task.ValidationProfile do
 
   defp metadata(_value), do: {:error, :invalid_metadata}
 
+  @doc false
+  @spec module(term()) :: {:ok, atom()} | {:error, :invalid_module}
   defp module(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
   defp module(_value), do: {:error, :invalid_module}
 
+  @doc false
+  @spec optional_module(term()) :: {:ok, atom() | nil} | {:error, :invalid_module}
   defp optional_module(nil), do: {:ok, nil}
   defp optional_module(value) when is_atom(value), do: {:ok, value}
   defp optional_module(_value), do: {:error, :invalid_module}
 
+  @doc false
+  @spec keyword(term()) :: {:ok, keyword()} | {:error, :invalid_keyword}
   defp keyword(value) when is_list(value) do
     if Keyword.keyword?(value), do: {:ok, value}, else: {:error, :invalid_keyword}
   end
