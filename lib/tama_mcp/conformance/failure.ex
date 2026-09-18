@@ -45,9 +45,20 @@ defmodule TamaMCP.Conformance.Failure do
 
   defp truncate(value) do
     value
-    |> String.to_charlist()
-    |> Enum.slice(0, 509)
-    |> List.to_string()
+    |> String.replace_invalid("")
+    |> truncate_to_bytes(509)
     |> Kernel.<>("...")
+  end
+
+  defp truncate_to_bytes(value, budget) when byte_size(value) <= budget, do: value
+
+  defp truncate_to_bytes(value, budget) do
+    value
+    |> String.codepoints()
+    |> Enum.reduce_while("", fn codepoint, kept ->
+      if byte_size(kept) + byte_size(codepoint) <= budget,
+        do: {:cont, kept <> codepoint},
+        else: {:halt, kept}
+    end)
   end
 end

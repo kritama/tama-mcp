@@ -207,7 +207,7 @@ defmodule TamaMCP.Conformance.Store do
   defp raw_transition(ctx, task, status, attributes, revision \\ :current) do
     revision = if revision == :current, do: task.revision, else: revision
 
-    call!("transition/5", fn ->
+    call!("transition/6", fn ->
       ctx.adapter.transition(
         task.owner_key,
         task.id,
@@ -225,7 +225,7 @@ defmodule TamaMCP.Conformance.Store do
         next
 
       other ->
-        fail!("transition/5", "a valid transition must succeed", bounded(other))
+        fail!("transition/6", "a valid transition must succeed", bounded(other))
     end
   end
 
@@ -344,7 +344,7 @@ defmodule TamaMCP.Conformance.Store do
       )
 
     unless match?({:error, :conflict}, stale),
-      do: fail!("transition/5", "a stale revision must fail with :conflict", bounded(stale))
+      do: fail!("transition/6", "a stale revision must fail with :conflict", bounded(stale))
 
     missing =
       raw_transition(
@@ -356,7 +356,7 @@ defmodule TamaMCP.Conformance.Store do
 
     unless lookup_error?(missing),
       do:
-        fail!("transition/5", "a missing task must fail with a not_found error", bounded(missing))
+        fail!("transition/6", "a missing task must fail with a not_found error", bounded(missing))
 
     :ok
   end
@@ -374,7 +374,7 @@ defmodule TamaMCP.Conformance.Store do
     unless match?({:error, _}, equal),
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "an equal last_updated_at must not advance the task",
           bounded(equal)
         )
@@ -388,7 +388,7 @@ defmodule TamaMCP.Conformance.Store do
     unless match?({:error, _}, older),
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "an older last_updated_at must not advance the task",
           bounded(older)
         )
@@ -403,7 +403,7 @@ defmodule TamaMCP.Conformance.Store do
     unless stored.revision == task.revision + 1,
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "a committed transition must advance the revision by exactly one",
           "expected #{task.revision + 1}, got #{stored.revision}"
         )
@@ -411,7 +411,7 @@ defmodule TamaMCP.Conformance.Store do
     unless stored.last_updated_at == supplied,
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "a committed transition must store the supplied last_updated_at",
           bounded(stored.last_updated_at)
         )
@@ -419,7 +419,7 @@ defmodule TamaMCP.Conformance.Store do
     unless next.revision == stored.revision,
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "the returned snapshot must match the stored revision"
         )
 
@@ -441,7 +441,7 @@ defmodule TamaMCP.Conformance.Store do
     unless input.status == :input_required and input.input_requests == requests,
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "an input_required transition must retain its input requests",
           bounded(input.input_requests)
         )
@@ -455,7 +455,7 @@ defmodule TamaMCP.Conformance.Store do
     unless completed.status == :completed,
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "a completed transition must reach :completed",
           bounded(completed.status)
         )
@@ -465,7 +465,7 @@ defmodule TamaMCP.Conformance.Store do
     unless match?({:error, :invalid_state}, revived),
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "a non-replay transition out of a terminal state must fail with :invalid_state",
           bounded(revived)
         )
@@ -490,7 +490,7 @@ defmodule TamaMCP.Conformance.Store do
 
       other ->
         fail!(
-          "transition/5",
+          "transition/6",
           "an exact terminal replay must return the committed task without advancing the revision",
           bounded(other)
         )
@@ -505,7 +505,7 @@ defmodule TamaMCP.Conformance.Store do
     unless match?({:error, :invalid_state}, mutated),
       do:
         fail!(
-          "transition/5",
+          "transition/6",
           "a terminal replay with changed attributes must fail with :invalid_state",
           bounded(mutated)
         )

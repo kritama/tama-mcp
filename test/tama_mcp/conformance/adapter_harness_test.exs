@@ -760,7 +760,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports an invalid transition result" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*valid transition must succeed/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*valid transition must succeed/, fn ->
       Conformance.Store.check(Conformance.TestInvalidTransitionStore,
         adapter_options: [
           agent: store,
@@ -932,7 +932,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports a stale transition that is not a conflict" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*stale revision/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*stale revision/, fn ->
       Conformance.Store.check(Conformance.TestMutantStore,
         adapter_options: [
           agent: store,
@@ -948,7 +948,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports a missing-task transition that succeeds" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*missing task/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*missing task/, fn ->
       Conformance.Store.check(Conformance.TestMutantStore,
         adapter_options: [
           agent: store,
@@ -964,7 +964,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports a snapshot that does not match the store" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*returned snapshot/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*returned snapshot/, fn ->
       Conformance.Store.check(Conformance.TestMutantStore,
         adapter_options: [
           agent: store,
@@ -980,7 +980,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports mangled transitions" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*input requests/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*input requests/, fn ->
       Conformance.Store.check(Conformance.TestMutantStore,
         adapter_options: [
           agent: store,
@@ -996,7 +996,7 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
   test "the store harness reports a failed exact terminal replay" do
     store = TestSupport.Tasks.Store.start_link() |> elem(1)
 
-    assert_raise(Failure, ~r/transition\/?5.*exact terminal replay/, fn ->
+    assert_raise(Failure, ~r/transition\/6.*exact terminal replay/, fn ->
       Conformance.Store.check(Conformance.TestMutantStore,
         adapter_options: [
           agent: store,

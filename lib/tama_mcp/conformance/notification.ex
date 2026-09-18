@@ -502,13 +502,15 @@ defmodule TamaMCP.Conformance.Notification do
     end
 
     if ctx.strict_revisions do
-      strict_stale(ctx, task, newer)
+      strict_stale(ctx)
     end
 
     :ok
   end
 
-  defp strict_stale(ctx, task, newer) do
+  defp strict_stale(ctx) do
+    task = ctx.factory.()
+    newer = advance(advance(task, 10), 20)
     subscription = subscribe!(ctx, [task.id], spawn_relay(), 4)
     older = advance(task, 10)
 
@@ -519,6 +521,14 @@ defmodule TamaMCP.Conformance.Notification do
       Process.sleep(30)
 
       revisions = drain!(ctx, subscription, 8) |> Enum.map(& &1.revision)
+
+      if revisions == [],
+        do:
+          fail!(
+            "publish/2",
+            "a newer published snapshot must still be delivered",
+            bounded(revisions)
+          )
 
       unless Enum.all?(revisions, &(&1 >= newer.revision)),
         do:
