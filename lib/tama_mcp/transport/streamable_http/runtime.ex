@@ -9,24 +9,26 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   alias __MODULE__.Validation
   alias TamaMCP.Transport.StreamableHTTP.Result
 
+  @profile_defaults TamaMCP.Task.Validation.Profile.defaults()
+
   @default_limits %{
     max_body_bytes: 1_048_576,
     body_read_timeout_ms: 5_000,
     request_timeout_ms: 30_000,
-    max_result_bytes: 1_048_576,
+    max_result_bytes: @profile_defaults.max_result_bytes,
     max_schema_bytes: 262_144,
     max_tools_per_server: 256,
     default_task_ttl_ms: 86_400_000,
-    max_task_ttl_ms: 604_800_000,
+    max_task_ttl_ms: @profile_defaults.max_task_ttl_ms,
     default_poll_interval_ms: 1_000,
-    max_input_request_keys_per_task: 256,
+    max_input_request_keys_per_task: @profile_defaults.max_input_request_keys_per_task,
     max_task_ids_per_subscription: 100,
     notification_buffer_capacity: 100,
     stream_keepalive_interval_ms: 15_000,
     stream_authorization_recheck_ms: 60_000,
     stream_max_lifetime_ms: 3_600_000,
-    max_status_message_bytes: 2_048,
-    max_error_data_bytes: 8_192,
+    max_status_message_bytes: @profile_defaults.max_status_message_bytes,
+    max_error_data_bytes: @profile_defaults.max_error_data_bytes,
     max_www_authenticate_bytes: 4_096,
     max_safe_metadata_bytes: 16_384
   }
