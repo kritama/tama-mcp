@@ -1,4 +1,4 @@
-defmodule TamaMCP.Task.ValidationProfile do
+defmodule TamaMCP.Task.Validation.Profile do
   @moduledoc """
   Versioned, persistable snapshot of the package-owned task-validation limits.
 
@@ -9,9 +9,9 @@ defmodule TamaMCP.Task.ValidationProfile do
   metadata — in a versioned, JSON-safe form that hosts can persist next to
   the task:
 
-      case TamaMCP.Task.ValidationProfile.from_options(validation_options) do
+      case TamaMCP.Task.Validation.Profile.from_options(validation_options) do
         {:ok, profile} ->
-          # Persist TamaMCP.Task.ValidationProfile.encode(profile) with the
+          # Persist TamaMCP.Task.Validation.Profile.encode(profile) with the
           # task.
 
         {:error, :invalid_profile} ->
@@ -22,7 +22,7 @@ defmodule TamaMCP.Task.ValidationProfile do
   reconstructs the package validation options:
 
       {:ok, options} =
-        TamaMCP.Task.ValidationProfile.options(profile,
+        TamaMCP.Task.Validation.Profile.options(profile,
           cache: MyCache,
           cache_options: my_cache_options,
           tool: MyTool
@@ -36,7 +36,7 @@ defmodule TamaMCP.Task.ValidationProfile do
   defaults from it.
   """
 
-  alias TamaMCP.Task.ValidationProfile.Limits
+  alias TamaMCP.Task.Validation.Profile.Limits
 
   @version 1
 

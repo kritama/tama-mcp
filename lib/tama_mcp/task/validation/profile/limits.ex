@@ -1,4 +1,4 @@
-defmodule TamaMCP.Task.ValidationProfile.Limits do
+defmodule TamaMCP.Task.Validation.Profile.Limits do
   @moduledoc false
 
   # Internal validators for validation-profile limits and host resolutions.

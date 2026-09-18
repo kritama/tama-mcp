@@ -1,9 +1,9 @@
-defmodule TamaMCP.Task.ValidationProfileTest do
+defmodule TamaMCP.Task.Validation.ProfileTest do
   @moduledoc false
 
   use ExUnit.Case, async: true
 
-  alias TamaMCP.Task.ValidationProfile
+  alias TamaMCP.Task.Validation.Profile
   alias TamaMCP.TestSupport
   alias TamaMCP.Transport.StreamableHTTP.Runtime
 
@@ -22,7 +22,7 @@ defmodule TamaMCP.Task.ValidationProfileTest do
   ]
 
   test "defaults are defined in one place and shared with the transport" do
-    defaults = ValidationProfile.defaults()
+    defaults = Profile.defaults()
 
     assert %{
              max_status_message_bytes: 2_048,
@@ -44,9 +44,9 @@ defmodule TamaMCP.Task.ValidationProfileTest do
 
   describe "from_options/1" do
     test "captures the package-owned limits and ignores host-owned entries" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
+      assert {:ok, profile} = Profile.from_options(@options)
 
-      assert %ValidationProfile{
+      assert %Profile{
                version: 1,
                max_status_message_bytes: 4_096,
                max_task_ttl_ms: 1_209_600_000,
@@ -64,7 +64,7 @@ defmodule TamaMCP.Task.ValidationProfileTest do
 
     test "defaults result metadata when it is absent" do
       assert {:ok, profile} =
-               ValidationProfile.from_options(Keyword.delete(@options, :result_metadata))
+               Profile.from_options(Keyword.delete(@options, :result_metadata))
 
       assert profile.result_metadata == %{}
     end
@@ -78,11 +78,11 @@ defmodule TamaMCP.Task.ValidationProfileTest do
             :max_error_data_bytes
           ] do
         assert {:error, :invalid_profile} =
-                 ValidationProfile.from_options(Keyword.delete(@options, key))
+                 Profile.from_options(Keyword.delete(@options, key))
 
         for invalid <- [0, -1, 1.5, "1", nil, :atom] do
           assert {:error, :invalid_profile} =
-                   ValidationProfile.from_options(Keyword.put(@options, key, invalid))
+                   Profile.from_options(Keyword.put(@options, key, invalid))
         end
       end
 
@@ -93,19 +93,17 @@ defmodule TamaMCP.Task.ValidationProfileTest do
             "a string"
           ] do
         assert {:error, :invalid_profile} =
-                 ValidationProfile.from_options(
-                   Keyword.put(@options, :result_metadata, unsafe_metadata)
-                 )
+                 Profile.from_options(Keyword.put(@options, :result_metadata, unsafe_metadata))
       end
 
-      assert {:error, :invalid_profile} = ValidationProfile.from_options(:not_a_keyword)
+      assert {:error, :invalid_profile} = Profile.from_options(:not_a_keyword)
     end
   end
 
   describe "encode/1 and decode/1" do
     test "round-trips the profile losslessly through a JSON-safe map" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
-      encoded = ValidationProfile.encode(profile)
+      assert {:ok, profile} = Profile.from_options(@options)
+      encoded = Profile.encode(profile)
 
       assert %{
                "version" => 1,
@@ -121,14 +119,14 @@ defmodule TamaMCP.Task.ValidationProfileTest do
 
       assert {:ok, json} = Jason.encode(encoded)
       assert {:ok, ^encoded} = Jason.decode(json)
-      assert {:ok, ^profile} = ValidationProfile.decode(encoded)
+      assert {:ok, ^profile} = Profile.decode(encoded)
     end
 
     test "round-trips default-valued profiles" do
-      defaults = ValidationProfile.defaults()
+      defaults = Profile.defaults()
 
       assert {:ok, profile} =
-               ValidationProfile.from_options(
+               Profile.from_options(
                  max_status_message_bytes: defaults.max_status_message_bytes,
                  max_task_ttl_ms: defaults.max_task_ttl_ms,
                  max_input_request_keys_per_task: defaults.max_input_request_keys_per_task,
@@ -137,27 +135,27 @@ defmodule TamaMCP.Task.ValidationProfileTest do
                  result_metadata: defaults.result_metadata
                )
 
-      assert {:ok, ^profile} = ValidationProfile.decode(ValidationProfile.encode(profile))
+      assert {:ok, ^profile} = Profile.decode(Profile.encode(profile))
     end
 
     test "rejects unknown versions" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
-      encoded = ValidationProfile.encode(profile)
+      assert {:ok, profile} = Profile.from_options(@options)
+      encoded = Profile.encode(profile)
 
       assert {:error, :invalid_profile} =
-               ValidationProfile.decode(Map.put(encoded, "version", 2))
+               Profile.decode(Map.put(encoded, "version", 2))
 
       assert {:error, :invalid_profile} =
-               ValidationProfile.decode(Map.put(encoded, "version", "1"))
+               Profile.decode(Map.put(encoded, "version", "1"))
     end
 
     test "rejects missing, extra, and malformed fields" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
-      encoded = ValidationProfile.encode(profile)
+      assert {:ok, profile} = Profile.from_options(@options)
+      encoded = Profile.encode(profile)
 
       for key <- map_keys(encoded) do
         assert {:error, :invalid_profile} =
-                 ValidationProfile.decode(Map.delete(encoded, key))
+                 Profile.decode(Map.delete(encoded, key))
       end
 
       for extra <- [
@@ -167,14 +165,14 @@ defmodule TamaMCP.Task.ValidationProfileTest do
             "maxTaskTtlMsLegacy"
           ] do
         assert {:error, :invalid_profile} =
-                 ValidationProfile.decode(Map.put(encoded, extra, true))
+                 Profile.decode(Map.put(encoded, extra, true))
       end
 
       assert {:error, :invalid_profile} =
-               ValidationProfile.decode(Map.put(encoded, "maxTaskTtlMs", -604_800_000))
+               Profile.decode(Map.put(encoded, "maxTaskTtlMs", -604_800_000))
 
       assert {:error, :invalid_profile} =
-               ValidationProfile.decode(Map.put(encoded, "maxResultBytes", 2_097_152.5))
+               Profile.decode(Map.put(encoded, "maxResultBytes", 2_097_152.5))
 
       for unsafe_metadata <- [
             %{server: "tama"},
@@ -182,21 +180,21 @@ defmodule TamaMCP.Task.ValidationProfileTest do
             "a string"
           ] do
         assert {:error, :invalid_profile} =
-                 ValidationProfile.decode(Map.put(encoded, "resultMetadata", unsafe_metadata))
+                 Profile.decode(Map.put(encoded, "resultMetadata", unsafe_metadata))
       end
 
-      assert {:error, :invalid_profile} = ValidationProfile.decode(nil)
-      assert {:error, :invalid_profile} = ValidationProfile.decode("a string")
-      assert {:error, :invalid_profile} = ValidationProfile.decode(%{:version => 1})
+      assert {:error, :invalid_profile} = Profile.decode(nil)
+      assert {:error, :invalid_profile} = Profile.decode("a string")
+      assert {:error, :invalid_profile} = Profile.decode(%{:version => 1})
     end
   end
 
   describe "options/2" do
     test "reconstructs package validation options with the host cache and tool" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
+      assert {:ok, profile} = Profile.from_options(@options)
 
       assert {:ok, reconstructed} =
-               ValidationProfile.options(profile,
+               Profile.options(profile,
                  cache: TestSupport.Cache,
                  cache_options: [],
                  tool: TestSupport.Tools.Echo
@@ -205,16 +203,16 @@ defmodule TamaMCP.Task.ValidationProfileTest do
       assert Enum.sort(reconstructed) == Enum.sort(@options)
 
       assert {:ok, without_tool} =
-               ValidationProfile.options(profile, cache: TestSupport.Cache)
+               Profile.options(profile, cache: TestSupport.Cache)
 
       refute Keyword.has_key?(without_tool, :tool)
     end
 
     test "a reconstructed profile validates and transitions the same task" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
+      assert {:ok, profile} = Profile.from_options(@options)
 
       assert {:ok, reconstructed} =
-               ValidationProfile.options(profile,
+               Profile.options(profile,
                  cache: TestSupport.Cache,
                  tool: TestSupport.Tools.Echo
                )
@@ -243,21 +241,21 @@ defmodule TamaMCP.Task.ValidationProfileTest do
     end
 
     test "fails closed on invalid host resolutions" do
-      assert {:ok, profile} = ValidationProfile.from_options(@options)
+      assert {:ok, profile} = Profile.from_options(@options)
 
-      assert {:error, :invalid_resolution} = ValidationProfile.options(profile, [])
-
-      assert {:error, :invalid_resolution} =
-               ValidationProfile.options(profile, cache: "not-a-module")
+      assert {:error, :invalid_resolution} = Profile.options(profile, [])
 
       assert {:error, :invalid_resolution} =
-               ValidationProfile.options(profile, cache: TestSupport.Cache, cache_options: "no")
+               Profile.options(profile, cache: "not-a-module")
 
       assert {:error, :invalid_resolution} =
-               ValidationProfile.options(profile, cache: TestSupport.Cache, tool: 42)
+               Profile.options(profile, cache: TestSupport.Cache, cache_options: "no")
 
       assert {:error, :invalid_resolution} =
-               ValidationProfile.options(profile, :not_a_keyword)
+               Profile.options(profile, cache: TestSupport.Cache, tool: 42)
+
+      assert {:error, :invalid_resolution} =
+               Profile.options(profile, :not_a_keyword)
     end
   end
 

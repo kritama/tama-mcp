@@ -9,7 +9,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Runtime do
   alias __MODULE__.Validation
   alias TamaMCP.Transport.StreamableHTTP.Result
 
-  @profile_defaults TamaMCP.Task.ValidationProfile.defaults()
+  @profile_defaults TamaMCP.Task.Validation.Profile.defaults()
 
   @default_limits %{
     max_body_bytes: 1_048_576,

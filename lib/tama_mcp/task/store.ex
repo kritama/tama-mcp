@@ -80,14 +80,14 @@ defmodule TamaMCP.Task.Store do
   package-owned profile so later or cross-node transitions apply the same
   effective limits:
 
-      case TamaMCP.Task.ValidationProfile.from_options(
+      case TamaMCP.Task.Validation.Profile.from_options(
              Keyword.fetch!(options[:tama_mcp], :task_validation_options)
            ) do
         {:ok, profile} ->
-          # Persist TamaMCP.Task.ValidationProfile.encode(profile) with the
+          # Persist TamaMCP.Task.Validation.Profile.encode(profile) with the
           # task, then validate and transition with the reconstructed options:
           #
-          # TamaMCP.Task.ValidationProfile.options(profile,
+          # TamaMCP.Task.Validation.Profile.options(profile,
           #   cache: MyCache, cache_options: cache_options, tool: MyTool
           # )
 
