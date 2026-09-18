@@ -10,6 +10,13 @@ The project follows Semantic Versioning and uses Conventional Commits.
 
 - Added object and nullable field composition, nested object declarations, and
   bounded named output variants to the compile-time Tool schema DSL.
+- Added `TamaMCP.Task.InputResponses.plan/3`, a pure acceptance planner for
+  `input_required` task input responses.
+- Added `TamaMCP.Conformance.Store.check/2` and
+  `TamaMCP.Conformance.Notification.check/2`, adapter conformance harnesses
+  that exercise the `TamaMCP.Task.Store` and `TamaMCP.Notification` contracts
+  through the public callbacks and report violations with
+  `TamaMCP.Conformance.Failure`.
 - Added `TamaMCP.Task.Validation.Profile`, a versioned, persistable snapshot of
   the package-owned task-validation limits. Hosts can build a profile from the
   effective runtime task-validation options, persist the encoded versioned

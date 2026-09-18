@@ -99,6 +99,10 @@ defmodule TamaMCP.Task.Store do
   cache module, cache options, and originating tool module are resolved by
   the host from its own configuration and allowlist at reconstruction time
   and are never persisted by the package.
+  Hosts can exercise these rules through
+  `TamaMCP.Conformance.Store.check/2`, the same harness the package's
+  reference store passes.
+
   """
 
   alias TamaMCP.{Error, Task}

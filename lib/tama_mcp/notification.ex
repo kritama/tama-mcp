@@ -17,6 +17,10 @@ defmodule TamaMCP.Notification do
   snapshots for the same task because the transport re-fetches current durable
   state before delivery. It must never exceed the capacity supplied to
   `subscribe/4` or allow publisher work to wait on stream I/O.
+
+  Hosts can exercise these rules through
+  `TamaMCP.Conformance.Notification.check/2`, the same harness the package's
+  local notification adapter passes.
   """
 
   alias TamaMCP.{Error, Task}
