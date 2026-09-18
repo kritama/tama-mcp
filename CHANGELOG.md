@@ -10,6 +10,15 @@ The project follows Semantic Versioning and uses Conventional Commits.
 
 - Added object and nullable field composition, nested object declarations, and
   bounded named output variants to the compile-time Tool schema DSL.
+- Added `TamaMCP.Task.Validation.Profile`, a versioned, persistable snapshot of
+  the package-owned task-validation limits. Hosts can build a profile from the
+  effective runtime task-validation options, persist the encoded versioned
+  map, and reconstruct package validation options on another node with their
+  own cache and allowlisted tool. The Streamable HTTP transport now derives
+  its task-validation defaults from `Validation.Profile.defaults/0` so profile
+  construction cannot drift from the package defaults. Decoding is strict:
+  unknown versions, missing or extra fields, invalid bounds, and unsafe result
+  metadata fail closed without creating atoms.
 
 ## [0.1.1] (2026-09-17)
 
