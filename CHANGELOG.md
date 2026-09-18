@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
-## Unreleased
+## [0.2.0] (2026-09-18)
 
 ### Added
 
