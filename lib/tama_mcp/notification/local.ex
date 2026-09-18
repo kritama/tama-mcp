@@ -4,11 +4,15 @@ defmodule TamaMCP.Notification.Local do
 
   The adapter coalesces ingress by task ID and subscription in ETS, wakes its
   GenServer at most once while ingress is pending, and keeps each subscription
-  queue inside the GenServer. The configured capacity covers both retained
-  ingress and the queue. When that capacity would be exceeded, the adapter
-  drops both, stops routing publications to the subscription, and signals
-  overflow. This bounds ingress, adapter state, and the subscriber mailbox
-  without making publishers wait on stream I/O.
+  queue inside the GenServer as a `TamaMCP.Notification.Buffer`. A newer
+  revision of a pending task replaces the queued snapshot without consuming
+  additional capacity, and a published revision that is equal to or older than
+  the pending snapshot is ignored. The configured capacity counts distinct
+  pending task IDs and covers both retained ingress and the queue. When that
+  capacity would be exceeded, the adapter drops both, stops routing
+  publications to the subscription, and signals overflow. This bounds ingress,
+  adapter state, and the subscriber mailbox without making publishers wait on
+  stream I/O.
 
   Start the adapter under the host supervision tree and pass its pid or name as
   `:server` in `:notification_options`.
@@ -19,6 +23,7 @@ defmodule TamaMCP.Notification.Local do
   @behaviour TamaMCP.Notification
 
   alias TamaMCP.{Error, Notification, Task}
+  alias TamaMCP.Notification.Buffer
 
   @ingress_key {__MODULE__, :ingress}
 
@@ -89,10 +94,7 @@ defmodule TamaMCP.Notification.Local do
       subscriber: subscriber,
       monitor: monitor,
       task_ids: MapSet.new(task_ids),
-      capacity: capacity,
-      queue: :queue.new(),
-      size: 0,
-      overflow: false
+      buffer: Buffer.new(capacity)
     }
 
     state =
@@ -108,9 +110,6 @@ defmodule TamaMCP.Notification.Local do
     case Map.get(state.subscriptions, subscription) do
       nil ->
         {:reply, {:error, :closed}, state}
-
-      %{overflow: true} ->
-        {:reply, {:error, :overflow}, state}
 
       entry ->
         take_active(subscription, entry, state)
@@ -135,18 +134,25 @@ defmodule TamaMCP.Notification.Local do
   end
 
   defp take_entry(subscription, entry, state) do
-    case :queue.out(entry.queue) do
-      {{:value, task}, queue} ->
-        updated = %{entry | queue: queue, size: entry.size - 1}
+    case Buffer.take(entry.buffer) do
+      {{:ok, task}, buffer} ->
         release_buffered(state.ingress, subscription)
 
-        if updated.size > 0,
-          do: send(updated.subscriber, Notification.ready(subscription))
+        if Buffer.size(buffer) > 0,
+          do: send(entry.subscriber, Notification.ready(subscription))
 
-        {:reply, {:ok, task}, put_in(state, [:subscriptions, subscription], updated)}
+        {:reply, {:ok, task}, store_entry(state, subscription, %{entry | buffer: buffer})}
 
-      {:empty, _queue} ->
+      {:empty, _buffer} ->
         {:reply, :empty, state}
+
+      # The entry only reaches this branch after its buffer already entered
+      # the terminal overflow state, so no overflow message is re-sent.
+      {:overflow, _buffer} ->
+        {:reply, {:error, :overflow}, state}
+
+      {:closed, _buffer} ->
+        {:reply, {:error, :closed}, state}
     end
   end
 
@@ -163,18 +169,32 @@ defmodule TamaMCP.Notification.Local do
 
   defp enqueue(subscription, task, state) do
     case Map.get(state.subscriptions, subscription) do
-      %{overflow: false, size: size, capacity: capacity} = entry when size < capacity ->
-        if size == 0, do: send(entry.subscriber, Notification.ready(subscription))
-
-        updated = %{entry | queue: :queue.in(task, entry.queue), size: size + 1}
-        put_in(state, [:subscriptions, subscription], updated)
-
-      %{overflow: false} = entry ->
-        overflow(subscription, entry, state)
-
-      _closed_or_overflowed ->
-        state
+      nil -> state
+      entry -> retain_for_entry(subscription, entry, task, state)
     end
+  end
+
+  defp retain_for_entry(subscription, entry, task, state) do
+    case Buffer.retain(entry.buffer, task) do
+      {:retained, buffer} ->
+        if Buffer.size(buffer) == 1,
+          do: send(entry.subscriber, Notification.ready(subscription))
+
+        store_entry(state, subscription, %{entry | buffer: buffer})
+
+      {:replaced, buffer} ->
+        store_entry(state, subscription, %{entry | buffer: buffer})
+
+      {:ignored, _buffer} ->
+        state
+
+      {:overflow, buffer} ->
+        overflow(subscription, %{entry | buffer: buffer}, state)
+    end
+  end
+
+  defp store_entry(state, subscription, entry) do
+    put_in(state, [:subscriptions, subscription], entry)
   end
 
   defp drain_ingress(state) do
@@ -195,16 +215,25 @@ defmodule TamaMCP.Notification.Local do
   defp drain_overflow(state, subscription) do
     case :ets.take(state.ingress, {:overflow, subscription}) do
       [{{:overflow, ^subscription}, true}] ->
-        case Map.get(state.subscriptions, subscription) do
-          %{overflow: false} = entry ->
-            overflow(subscription, entry, state)
-
-          _closed_or_overflowed ->
-            :ets.delete(state.ingress, {:buffered, subscription})
-            state
-        end
+        clear_overflow_flag(state, subscription)
 
       _missing_or_invalid ->
+        state
+    end
+  end
+
+  defp clear_overflow_flag(state, subscription) do
+    case Map.get(state.subscriptions, subscription) do
+      %{buffer: buffer} = entry ->
+        if Buffer.overflowed?(buffer) do
+          :ets.delete(state.ingress, {:buffered, subscription})
+          state
+        else
+          overflow(subscription, entry, state)
+        end
+
+      _closed_or_overflowed ->
+        :ets.delete(state.ingress, {:buffered, subscription})
         state
     end
   end
@@ -274,9 +303,7 @@ defmodule TamaMCP.Notification.Local do
     |> unindex(subscription, entry.task_ids)
     |> put_in([:subscriptions, subscription], %{
       entry
-      | queue: :queue.new(),
-        size: 0,
-        overflow: true
+      | buffer: Buffer.mark_overflow(entry.buffer)
     })
   end
 

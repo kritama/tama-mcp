@@ -17,6 +17,33 @@ defmodule TamaMCP.Notification do
   snapshots for the same task because the transport re-fetches current durable
   state before delivery. It must never exceed the capacity supplied to
   `subscribe/4` or allow publisher work to wait on stream I/O.
+
+  ## Clustered routing
+
+  Hosts that route across a cluster own the routing layer (for example
+  Phoenix.PubSub topics and one process per subscription) and delegate the
+  revision, ordering, and capacity decisions to the package-owned
+  `TamaMCP.Notification.Buffer`:
+
+      # Host-owned subscription state.
+      buffer = TamaMCP.Notification.Buffer.new(capacity)
+
+      # On each committed task broadcast for a subscribed ID:
+      {_status, buffer} = TamaMCP.Notification.Buffer.retain(buffer, task)
+
+      # On subscriber demand, re-fetch durable current state before delivery:
+      case TamaMCP.Notification.Buffer.take(buffer) do
+        {{:ok, snapshot}, buffer} -> {:ok, buffer}
+        {empty_or_terminal, buffer} -> {empty_or_terminal, buffer}
+      end
+
+  The host owns topics, subscription processes, delivery I/O, and the mapping
+  of terminal buffer states to `:overflow` and `:closed` errors. The package
+  owns the bounded state machine: a newer pending revision replaces the queued
+  snapshot, equal or older revisions are ignored, capacity counts distinct
+  pending task IDs, and crossing capacity is a single terminal overflow that
+  drops retained content. `TamaMCP.Notification.Local` is the process-local
+  reference adapter built on the same primitive.
   """
 
   alias TamaMCP.{Error, Task}
