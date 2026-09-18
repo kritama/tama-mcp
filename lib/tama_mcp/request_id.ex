@@ -41,7 +41,7 @@ defmodule TamaMCP.RequestID do
   values that are not strings or integers, fails closed with
   `{:error, :invalid_request_id}`. Any integer is accepted.
   """
-  @spec encode(id()) :: {:ok, map()} | {:error, :invalid_request_id}
+  @spec encode(term()) :: {:ok, map()} | {:error, :invalid_request_id}
   def encode(id) when is_binary(id) do
     if String.valid?(id) and byte_size(id) <= @max_string_bytes,
       do: {:ok, %{"type" => "string", "value" => id}},
@@ -70,7 +70,7 @@ defmodule TamaMCP.RequestID do
   tag, an invalid UTF-8 string, atom keys, or extra keys. Decoding never
   creates atoms from persisted input.
   """
-  @spec decode(map() | nil) :: {:ok, id()} | {:error, :invalid_request_id}
+  @spec decode(term()) :: {:ok, id()} | {:error, :invalid_request_id}
   def decode(nil), do: {:error, :invalid_request_id}
 
   def decode(%{"type" => "string", "value" => value} = tagged)
