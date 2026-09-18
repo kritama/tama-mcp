@@ -31,9 +31,10 @@ defmodule TamaMCP.Notification do
       # On each committed task broadcast for a subscribed ID:
       {_status, buffer} = TamaMCP.Notification.Buffer.retain(buffer, task)
 
-      # On subscriber demand, re-fetch durable current state before delivery:
+      # On subscriber demand the buffer yields the latest snapshot as a hint;
+      # the host re-fetches durable current state (tasks/get) before delivery:
       case TamaMCP.Notification.Buffer.take(buffer) do
-        {{:ok, snapshot}, buffer} -> {:ok, buffer}
+        {{:ok, snapshot}, buffer} -> {:ok, buffer, snapshot}
         {empty_or_terminal, buffer} -> {empty_or_terminal, buffer}
       end
 

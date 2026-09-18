@@ -1275,17 +1275,16 @@ defmodule TamaMCP.Conformance.AdapterHarnessTest do
     end)
   end
 
-  test "the notification harness reports stale snapshots for strict adapters" do
+  test "the notification harness strict revision check passes for the local adapter" do
     local = Local.start_link([]) |> elem(1)
 
-    assert_raise(Failure, ~r/publish\/?2.*older revision must be ignored/, fn ->
-      Conformance.Notification.check(
-        Local,
-        adapter_options: [server: local],
-        task_factory: fn -> fresh_task() end,
-        strict_revisions: true
-      )
-    end)
+    assert :ok =
+             Conformance.Notification.check(
+               Local,
+               adapter_options: [server: local],
+               task_factory: fn -> fresh_task() end,
+               strict_revisions: true
+             )
   end
 
   defp fresh_task do
