@@ -128,9 +128,9 @@ defmodule TamaMCP.Task.Validation.Profile do
   Decodes and strictly validates a persisted profile map.
 
   Only the exact versioned field set produced by `encode/1` is accepted.
-  Unknown versions, missing or extra fields, non-positive bounds, unsafe
-  result metadata, and atom keys fail closed with `:invalid_profile` without
-  creating atoms from persisted input.
+  Unknown versions, missing or extra fields, non-positive bounds, a null or
+  unsafe result metadata, and atom keys fail closed with `:invalid_profile`
+  without creating atoms from persisted input.
   """
   @spec decode(map() | nil) :: {:ok, t()} | {:error, :invalid_profile}
   def decode(nil), do: {:error, :invalid_profile}
@@ -153,7 +153,7 @@ defmodule TamaMCP.Task.Validation.Profile do
          {:ok, max_input_request_keys_per_task} <- Limits.bound(max_input_request_keys_per_task),
          {:ok, max_result_bytes} <- Limits.bound(max_result_bytes),
          {:ok, max_error_data_bytes} <- Limits.bound(max_error_data_bytes),
-         {:ok, result_metadata} <- Limits.metadata(result_metadata) do
+         {:ok, result_metadata} <- Limits.required_metadata(result_metadata) do
       {
         :ok,
         %__MODULE__{

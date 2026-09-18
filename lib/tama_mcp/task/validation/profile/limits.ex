@@ -13,12 +13,15 @@ defmodule TamaMCP.Task.Validation.Profile.Limits do
   @doc "Validates the JSON-safe result metadata, defaulting absence to an empty map."
   @spec metadata(term()) :: {:ok, map()} | {:error, :invalid_metadata}
   def metadata(nil), do: {:ok, %{}}
+  def metadata(value), do: required_metadata(value)
 
-  def metadata(value) when is_map(value) do
+  @doc "Validates the persisted result metadata map, which must always be present."
+  @spec required_metadata(term()) :: {:ok, map()} | {:error, :invalid_metadata}
+  def required_metadata(value) when is_map(value) do
     if JSON.value?(value), do: {:ok, value}, else: {:error, :invalid_metadata}
   end
 
-  def metadata(_value), do: {:error, :invalid_metadata}
+  def required_metadata(_value), do: {:error, :invalid_metadata}
 
   @doc "Validates a required host-owned module reference."
   @spec module(term()) :: {:ok, atom()} | {:error, :invalid_module}

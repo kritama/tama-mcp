@@ -175,6 +175,7 @@ defmodule TamaMCP.Task.Validation.ProfileTest do
                Profile.decode(Map.put(encoded, "maxResultBytes", 2_097_152.5))
 
       for unsafe_metadata <- [
+            nil,
             %{server: "tama"},
             %{"nested" => [make_ref()]},
             "a string"
