@@ -44,6 +44,10 @@ defmodule TamaMCP.Notification do
   pending task IDs, and crossing capacity is a single terminal overflow that
   drops retained content. `TamaMCP.Notification.Local` is the process-local
   reference adapter built on the same primitive.
+  Hosts can exercise these rules through
+  `TamaMCP.Conformance.Notification.check/2`, the same harness the package's
+  local notification adapter passes.
+
   """
 
   alias TamaMCP.{Error, Task}
