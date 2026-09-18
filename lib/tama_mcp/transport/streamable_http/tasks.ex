@@ -85,6 +85,7 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
       {:error, :not_found} -> not_found(conn, request, runtime, base)
       {:error, :invalid_state} -> invalid_state(conn, request, runtime, base)
       {:error, :conflict} -> invalid_state(conn, request, runtime, base)
+      {:error, :invalid_input} -> invalid_input(conn, request, runtime, base)
       {:error, %Error{} = error} -> protocol_error(conn, request, error, runtime, base)
       _invalid -> unexpected(conn, request, runtime, base, :invalid_task_store_return)
     end
@@ -167,6 +168,16 @@ defmodule TamaMCP.Transport.StreamableHTTP.Tasks do
       Error.invalid_params("Task is not in a state that accepts this operation"),
       runtime,
       Map.put(base, :reason, :invalid_task_state)
+    )
+  end
+
+  defp invalid_input(conn, request, runtime, base) do
+    protocol_error(
+      conn,
+      request,
+      Error.invalid_params("inputResponses must be a JSON object of response values"),
+      runtime,
+      Map.put(base, :reason, :invalid_task_input)
     )
   end
 

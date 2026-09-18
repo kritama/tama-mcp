@@ -56,8 +56,9 @@ defmodule TamaMCP.Task.Store do
           end
 
         {:error, reason} ->
-          # Map `:invalid_state` and `:invalid_input` to the callback's
-          # bounded error terms.
+          # Return the planner's bounded terms unchanged: `:invalid_state`
+          # when the task cannot accept responses and `:invalid_input` when
+          # the incoming map is not a string-keyed JSON object.
           {:error, reason}
       end
 
@@ -79,7 +80,7 @@ defmodule TamaMCP.Task.Store do
   @type options :: keyword()
   @type lookup_error :: :not_found | Error.t()
   @type mutation_error ::
-          :not_found | :conflict | :invalid_state | :invalid_task | Error.t()
+          :not_found | :conflict | :invalid_state | :invalid_task | :invalid_input | Error.t()
 
   @callback create(Task.t(), options()) ::
               {:ok, Task.t()} | {:error, :conflict | Error.t()}
