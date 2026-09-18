@@ -9,7 +9,7 @@ defmodule TamaMCP.Task.Validation do
   @type source :: atom() | {:encoded_error, atom()} | {:option, atom(), term()}
   @type operator ::
           {:absent, atom()}
-          | {:binary_or_integer, atom()}
+          | {:binary_or_integer, atom(), pos_integer()}
           | {:boolean, atom()}
           | {:bounded_positive_integer, atom(), source(), pos_integer()}
           | {:json_object, atom()}
@@ -87,9 +87,17 @@ defmodule TamaMCP.Task.Validation do
   defp check(validation, {:absent, field}),
     do: is_nil(value(validation, field))
 
-  defp check(validation, {:binary_or_integer, field}) do
-    candidate = value(validation, field)
-    is_binary(candidate) or is_integer(candidate)
+  defp check(validation, {:binary_or_integer, field, max_bytes}) do
+    case value(validation, field) do
+      binary when is_binary(binary) ->
+        String.valid?(binary) and byte_size(binary) <= max_bytes
+
+      integer when is_integer(integer) ->
+        true
+
+      _other ->
+        false
+    end
   end
 
   defp check(validation, {:boolean, field}),

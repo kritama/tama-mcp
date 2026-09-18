@@ -32,6 +32,36 @@ defmodule TamaMCP.Task.Store do
   durable worker only after that commit. A request that accepts no new response
   must not signal the worker.
 
+  Use `TamaMCP.Task.InputResponses.plan/3` to classify the incoming responses
+  against the validated task and the host's recorded response history, commit
+  the returned plan inside the store's transaction, and signal the worker only
+  after commit:
+
+      case TamaMCP.Task.InputResponses.plan(task, recorded, input_responses) do
+        {:ok, %TamaMCP.Task.InputResponses.Plan{no_op: true}} ->
+          # No new response accepted: do not advance the revision or
+          # signal the worker.
+          :ok
+
+        {:ok, %TamaMCP.Task.InputResponses.Plan{} = plan} ->
+          with {:ok, updated} <-
+                 Task.transition(
+                   task,
+                   :input_required,
+                   %{input_requests: plan.remaining, last_updated_at: next_updated_at},
+                   validation_options
+                 ) do
+            # Commit `updated` and `plan.recorded` atomically, then
+            # signal the durable worker.
+          end
+
+        {:error, reason} ->
+          # Return the planner's bounded terms unchanged: `:invalid_state`
+          # when the task cannot accept responses and `:invalid_input` when
+          # the incoming map is not a string-keyed JSON object.
+          {:error, reason}
+      end
+
   `cancel/3` must atomically and idempotently record cooperative cancellation
   intent on a non-terminal task. It does not transition the task to
   `cancelled`, and it must not overwrite a terminal state that wins the race.
@@ -42,6 +72,59 @@ defmodule TamaMCP.Task.Store do
   `TamaMCP.Notification.publish_committed/2` with the committed task and
   these store options. Publication is deliberately outside the transaction;
   failure does not roll back the task and clients recover through `tasks/get`.
+
+  ## Persistence codecs
+
+  Task fields that are not plain scalars must be persisted with the package
+  codecs so decoding is lossless and fails closed. An error may be absent,
+  which hosts store as a null column; the request ID is always present:
+
+      {:ok, request_id} = TamaMCP.RequestID.encode(task.request_id)
+
+      %{
+        "error" => if(task.error, do: TamaMCP.Error.encode(task.error), else: nil),
+        "request_id" => request_id
+      }
+
+  Decode the columns back with `TamaMCP.Error.decode/1` and
+  `TamaMCP.RequestID.decode/1` before reconstructing the task. `Error.decode/1`
+  accepts a JSON null for an absent error; `RequestID.decode/1` requires a
+  tagged map because task payloads always carry a request ID. String request
+  IDs are bounded by `RequestID.max_string_bytes/0` while integer request IDs
+  are unrestricted. Both codecs accept only JSON-safe input and never create
+  atoms from persisted data.
+
+  ## Validation profiles
+
+  The `:task_validation_options` entry contains package-owned limits and
+  host-owned module references. A durable adapter persists only the
+  package-owned profile so later or cross-node transitions apply the same
+  effective limits:
+
+      case TamaMCP.Task.Validation.Profile.from_options(
+             Keyword.fetch!(options[:tama_mcp], :task_validation_options)
+           ) do
+        {:ok, profile} ->
+          # Persist TamaMCP.Task.Validation.Profile.encode(profile) with the
+          # task, then validate and transition with the reconstructed options:
+          #
+          # TamaMCP.Task.Validation.Profile.options(profile,
+          #   cache: MyCache, cache_options: cache_options, tool: MyTool
+          # )
+
+        {:error, :invalid_profile} ->
+          {:error, TamaMCP.Error.internal()}
+      end
+
+  The profile is the only serializable part of the validation options. The
+  cache module, cache options, and originating tool module are resolved by
+  the host from its own configuration and allowlist at reconstruction time
+  and are never persisted by the package.
+  Hosts can exercise these rules through
+  `TamaMCP.Conformance.Store.check/2`, the same harness the package's
+  reference store passes.
+
+
   """
 
   alias TamaMCP.{Error, Task}
@@ -50,7 +133,7 @@ defmodule TamaMCP.Task.Store do
   @type options :: keyword()
   @type lookup_error :: :not_found | Error.t()
   @type mutation_error ::
-          :not_found | :conflict | :invalid_state | :invalid_task | Error.t()
+          :not_found | :conflict | :invalid_state | :invalid_task | :invalid_input | Error.t()
 
   @callback create(Task.t(), options()) ::
               {:ok, Task.t()} | {:error, :conflict | Error.t()}

@@ -7,7 +7,7 @@ defmodule TamaMCP.Task do
   on the MCP wire.
   """
 
-  alias TamaMCP.{Error, JSON, Protocol}
+  alias TamaMCP.{Error, JSON, Protocol, RequestID}
   alias TamaMCP.Task.Validation
 
   @statuses [:working, :input_required, :completed, :failed, :cancelled]
@@ -57,7 +57,7 @@ defmodule TamaMCP.Task do
     {:non_empty_binary, :id},
     {:present, :owner_key},
     {:non_empty_binary, :method},
-    {:binary_or_integer, :request_id},
+    {:binary_or_integer, :request_id, RequestID.max_string_bytes()},
     {:one_of, :status, @statuses},
     {:utc_datetime, :created_at},
     {:utc_datetime, :last_updated_at},

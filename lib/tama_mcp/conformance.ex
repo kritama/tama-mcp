@@ -24,6 +24,14 @@ defmodule TamaMCP.Conformance do
   `validate_schema_fixtures/3` checks the static positive and negative task
   values bundled beside the HTTP fixtures. These assertions cover invalid
   cross-state payloads that a conforming server must never emit.
+
+  `TamaMCP.Conformance.Store.check/2` and
+  `TamaMCP.Conformance.Notification.check/2` exercise the application adapter
+  contracts (`TamaMCP.Task.Store` and `TamaMCP.Notification`) through the
+  public callbacks only. Hosts supply adapter options, a fresh-task factory,
+  and optional setup/cleanup functions; violated rules raise
+  `TamaMCP.Conformance.Failure` naming the callback and rule. TamaMCP's
+  reference task store and local notification adapter run the same harness.
   """
 
   alias TamaMCP.Schema.{Protocol, Tasks}

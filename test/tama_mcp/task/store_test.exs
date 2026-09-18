@@ -177,6 +177,37 @@ defmodule TamaMCP.Task.StoreTest do
            }
   end
 
+  test "update rejects non-JSON-safe response maps without committing", %{options: options} do
+    task = task()
+    assert {:ok, ^task} = Store.create(task, options)
+
+    assert {:ok, waiting} =
+             Store.transition(
+               task.owner_key,
+               task.id,
+               task.revision,
+               :input_required,
+               %{
+                 input_requests: %{"approval" => elicitation_request()},
+                 last_updated_at: later(1)
+               },
+               options
+             )
+
+    assert {:error, :invalid_input} =
+             Store.update(task.owner_key, task.id, %{approval: %{"action" => "accept"}}, options)
+
+    assert {:error, :invalid_input} =
+             Store.update(
+               task.owner_key,
+               task.id,
+               %{"approval" => %{"action" => :accept}},
+               options
+             )
+
+    assert {:ok, ^waiting} = Store.get(task.owner_key, task.id, options)
+  end
+
   test "cooperative cancellation is durable, idempotent, and cannot overwrite a terminal winner",
        %{
          options: options

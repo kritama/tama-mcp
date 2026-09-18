@@ -253,6 +253,13 @@ adapter, and an application fixture set. Task HTTP fixtures may include bounded
 setup metadata that an application contract adapter uses to prepare the
 required durable state before issuing the wire request.
 
+Application adapters can run the same acceptance harnesses TamaMCP uses for
+its own reference adapters: `TamaMCP.Conformance.Store.check/2` verifies the
+durable task-store contract, and `TamaMCP.Conformance.Notification.check/2`
+verifies the notification delivery contract. Each harness is callable from a
+plain ExUnit suite and raises `TamaMCP.Conformance.Failure` naming the
+violated callback and behaviour rule.
+
 ## Dependencies
 
 - `jason` encodes and decodes JSON.

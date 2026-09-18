@@ -1,7 +1,7 @@
 defmodule TamaMCP.Transport.StreamableHTTP.Request do
   @moduledoc false
 
-  alias TamaMCP.{JSON, Protocol}
+  alias TamaMCP.{JSON, Protocol, RequestID}
   alias TamaMCP.Schema.Protocol, as: ProtocolSchema
   alias TamaMCP.Schema.Tasks, as: TaskSchema
   alias TamaMCP.Transport.StreamableHTTP.{Headers, Parameters, Runtime}
@@ -111,7 +111,14 @@ defmodule TamaMCP.Transport.StreamableHTTP.Request do
     do: {:error, TamaMCP.Error.invalid_request("method must be a string")}
 
   defp valid_id(id) when is_integer(id), do: {:ok, id}
-  defp valid_id(id) when is_binary(id), do: {:ok, id}
+
+  defp valid_id(id) when is_binary(id) do
+    if byte_size(id) <= RequestID.max_string_bytes() do
+      {:ok, id}
+    else
+      {:error, TamaMCP.Error.invalid_request("request ID exceeds the byte bound")}
+    end
+  end
 
   defp valid_id(_id) do
     {:error,
