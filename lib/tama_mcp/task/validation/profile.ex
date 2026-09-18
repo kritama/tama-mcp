@@ -196,7 +196,8 @@ defmodule TamaMCP.Task.Validation.Profile do
       result_metadata: profile.result_metadata
     ]
 
-    with true <- Keyword.has_key?(resolution, :cache),
+    with true <- Keyword.keyword?(resolution),
+         true <- Keyword.has_key?(resolution, :cache),
          {:ok, cache} <- Limits.module(resolution[:cache]),
          {:ok, cache_options} <- Limits.keyword(Keyword.get(resolution, :cache_options, [])),
          {:ok, tool} <- Limits.optional_module(Keyword.get(resolution, :tool)) do

@@ -257,6 +257,10 @@ defmodule TamaMCP.Task.Validation.ProfileTest do
 
       assert {:error, :invalid_resolution} =
                Profile.options(profile, :not_a_keyword)
+
+      for malformed <- [1, 2, 3, ["cache" | "tail"]] do
+        assert {:error, :invalid_resolution} = Profile.options(profile, malformed)
+      end
     end
   end
 
