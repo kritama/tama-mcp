@@ -10,6 +10,12 @@ The project follows Semantic Versioning and uses Conventional Commits.
 
 - Added object and nullable field composition, nested object declarations, and
   bounded named output variants to the compile-time Tool schema DSL.
+- Added `TamaMCP.Error.decode/1`, a strict, lossless decoding counterpart to
+  `TamaMCP.Error.encode/2` for durable error persistence, and
+  `TamaMCP.RequestID.encode/1` / `TamaMCP.RequestID.decode/1`, tagged
+  persistence codecs that preserve JSON-RPC request-ID string versus integer
+  identity. Both decoders operate only on JSON-safe maps, fail closed on
+  malformed or oversized input, and never create atoms from persisted data.
 
 ## [0.1.1] (2026-09-17)
 

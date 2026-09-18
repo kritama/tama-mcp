@@ -72,6 +72,22 @@ defmodule TamaMCP.Task.Store do
   `TamaMCP.Notification.publish_committed/2` with the committed task and
   these store options. Publication is deliberately outside the transaction;
   failure does not roll back the task and clients recover through `tasks/get`.
+
+  ## Persistence codecs
+
+  Task fields that are not plain scalars must be persisted with the package
+  codecs so decoding is lossless and fails closed. An error may be absent,
+  which hosts store as a null column; the request ID is always present:
+
+      %{
+        "error" => if(task.error, do: TamaMCP.Error.encode(task.error), else: nil),
+        "request_id" => TamaMCP.RequestID.encode(task.request_id)
+      }
+
+  Decode the columns back with `TamaMCP.Error.decode/1` and
+  `TamaMCP.RequestID.decode/1` before reconstructing the task. Both decoders
+  accept only bounded, JSON-safe maps and never create atoms from persisted
+  input.
   """
 
   alias TamaMCP.{Error, Task}
