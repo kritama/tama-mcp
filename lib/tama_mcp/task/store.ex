@@ -72,6 +72,10 @@ defmodule TamaMCP.Task.Store do
   `TamaMCP.Notification.publish_committed/2` with the committed task and
   these store options. Publication is deliberately outside the transaction;
   failure does not roll back the task and clients recover through `tasks/get`.
+
+  Hosts can exercise these rules through
+  `TamaMCP.Conformance.Store.check/2`, the same harness the package's
+  reference store passes.
   """
 
   alias TamaMCP.{Error, Task}
