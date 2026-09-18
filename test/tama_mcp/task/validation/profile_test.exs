@@ -97,6 +97,10 @@ defmodule TamaMCP.Task.Validation.ProfileTest do
       end
 
       assert {:error, :invalid_profile} = Profile.from_options(:not_a_keyword)
+
+      for malformed <- [1, 2, 3, ["a" | "b"]] do
+        assert {:error, :invalid_profile} = Profile.from_options(malformed)
+      end
     end
   end
 

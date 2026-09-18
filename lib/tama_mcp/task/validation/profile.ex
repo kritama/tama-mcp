@@ -84,7 +84,8 @@ defmodule TamaMCP.Task.Validation.Profile do
   """
   @spec from_options(keyword()) :: {:ok, t()} | {:error, :invalid_profile}
   def from_options(options) when is_list(options) do
-    with {:ok, max_status_message_bytes} <- Limits.bound(options[:max_status_message_bytes]),
+    with true <- Keyword.keyword?(options),
+         {:ok, max_status_message_bytes} <- Limits.bound(options[:max_status_message_bytes]),
          {:ok, max_task_ttl_ms} <- Limits.bound(options[:max_task_ttl_ms]),
          {:ok, max_input_request_keys_per_task} <-
            Limits.bound(options[:max_input_request_keys_per_task]),
@@ -104,7 +105,7 @@ defmodule TamaMCP.Task.Validation.Profile do
         }
       }
     else
-      {:error, _invalid} -> {:error, :invalid_profile}
+      _invalid -> {:error, :invalid_profile}
     end
   end
 
