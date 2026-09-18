@@ -84,6 +84,32 @@ defmodule TamaMCP.RequestIDTest do
                RequestID.decode(%{"type" => "string", "value" => <<0xFF, 0xFE, "id">>})
     end
 
+    test "enforces the shared byte bound on string values" do
+      assert 512 = RequestID.max_string_bytes()
+
+      boundary = String.duplicate("a", RequestID.max_string_bytes())
+
+      assert {:ok, ^boundary} =
+               RequestID.decode(%{"type" => "string", "value" => boundary})
+
+      oversized = String.duplicate("a", RequestID.max_string_bytes() + 1)
+
+      assert {:error, :invalid_request_id} =
+               RequestID.decode(%{"type" => "string", "value" => oversized})
+
+      multibyte_boundary = String.duplicate("é", div(RequestID.max_string_bytes(), 2))
+      assert byte_size(multibyte_boundary) == RequestID.max_string_bytes()
+
+      assert {:ok, ^multibyte_boundary} =
+               RequestID.decode(%{"type" => "string", "value" => multibyte_boundary})
+
+      assert {:error, :invalid_request_id} =
+               RequestID.decode(%{
+                 "type" => "string",
+                 "value" => String.duplicate("é", div(RequestID.max_string_bytes(), 2) + 1)
+               })
+    end
+
     test "never creates atoms from persisted input" do
       assert {:ok, value} =
                RequestID.decode(%{"type" => "string", "value" => "a brand new value"})

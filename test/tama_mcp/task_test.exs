@@ -3,7 +3,7 @@ defmodule TamaMCP.TaskTest do
 
   use ExUnit.Case, async: true
 
-  alias TamaMCP.{Conformance, Error, Response, Task}
+  alias TamaMCP.{Conformance, Error, RequestID, Response, Task}
   alias TamaMCP.TestSupport.Cache
 
   @created ~U[2026-09-14 12:00:00Z]
@@ -221,6 +221,28 @@ defmodule TamaMCP.TaskTest do
 
     assert updated.ttl_ms == 691_200_000
     assert byte_size(updated.status_message) == 3_000
+  end
+
+  test "bounds string request IDs at the shared persistence limit" do
+    assert {:ok, %Task{}} =
+             Task.new(
+               Map.put(
+                 attributes(),
+                 :request_id,
+                 String.duplicate("a", RequestID.max_string_bytes())
+               )
+             )
+
+    assert {:error, :invalid_task} =
+             Task.new(
+               Map.put(
+                 attributes(),
+                 :request_id,
+                 String.duplicate("a", RequestID.max_string_bytes() + 1)
+               )
+             )
+
+    assert {:ok, %Task{}} = Task.new(Map.put(attributes(), :request_id, 42))
   end
 
   test "rejects invalid timestamps, TTLs, messages, and state payloads" do

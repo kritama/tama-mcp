@@ -12,6 +12,10 @@ defmodule TamaMCP.RequestID do
   depend on Ecto or prescribe database columns; hosts retain schema design,
   constraints, and row projection.
 
+  String request IDs are bounded by `max_string_bytes/0`. `TamaMCP.Task`
+  validation enforces the same bound, so every value the package can create
+  is a value `decode/1` can persist and recover.
+
       iex> TamaMCP.RequestID.encode(42)
       %{"type" => "integer", "value" => 42}
       iex> TamaMCP.RequestID.decode(%{"type" => "integer", "value" => 42})
@@ -23,6 +27,8 @@ defmodule TamaMCP.RequestID do
   """
 
   @type id :: String.t() | integer()
+
+  @max_string_bytes 512
 
   @doc """
   Encodes a JSON-RPC request ID as a tagged, JSON-safe map.
@@ -43,11 +49,21 @@ defmodule TamaMCP.RequestID do
   tag, an invalid UTF-8 string, atom keys, or extra keys. Decoding never
   creates atoms from persisted input.
   """
+  @doc """
+  The maximum byte size of a string request ID.
+
+  Task validation, persistence encoding, and `decode/1` all apply this bound
+  so values created by the package round-trip through any host schema that
+  stores request IDs in a column of this size.
+  """
+  @spec max_string_bytes() :: pos_integer()
+  def max_string_bytes, do: @max_string_bytes
+
   @spec decode(map() | nil) :: {:ok, id()} | {:error, :invalid_request_id}
   def decode(nil), do: {:error, :invalid_request_id}
 
   def decode(%{"type" => "string", "value" => value} = tagged)
-      when is_binary(value) and map_size(tagged) == 2 do
+      when is_binary(value) and byte_size(value) <= @max_string_bytes and map_size(tagged) == 2 do
     if String.valid?(value), do: {:ok, value}, else: {:error, :invalid_request_id}
   end
 

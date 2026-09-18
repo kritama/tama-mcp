@@ -16,6 +16,9 @@ The project follows Semantic Versioning and uses Conventional Commits.
   persistence codecs that preserve JSON-RPC request-ID string versus integer
   identity. Both decoders operate only on JSON-safe maps, fail closed on
   malformed or oversized input, and never create atoms from persisted data.
+  String request IDs are bounded by the shared
+  `TamaMCP.RequestID.max_string_bytes/0` limit, which task validation enforces
+  so every created task round-trips through the persistence codecs.
 
 ## [0.1.1] (2026-09-17)
 
