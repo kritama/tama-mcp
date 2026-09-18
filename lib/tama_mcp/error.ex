@@ -132,6 +132,66 @@ defmodule TamaMCP.Error do
     end
   end
 
+  @doc """
+  Decodes an error map produced by `encode/2` back into an error struct.
+
+  Unlike `encode/2`, which drops unsafe data rather than failing, decoding is
+  strict and fails closed with `{:error, :invalid_error}` for maps that are
+  not exactly `{code, message}` plus an optional `data` member: missing or
+  non-integer codes, missing, empty, invalid UTF-8, or overlong messages
+  (over 512 bytes), non-object or unsafe `data` values, atom or non-string
+  keys, extra keys, and `data` that exceeds the byte bound.
+
+  `nil` decodes to `{:ok, nil}`: durable task payloads may store an absent
+  error as a null column. Decoding never creates atoms from persisted input.
+  """
+  @spec decode(map() | nil) :: {:ok, t() | nil} | {:error, :invalid_error}
+  def decode(value), do: decode(value, 8_192)
+
+  @spec decode(map() | nil, pos_integer()) :: {:ok, t() | nil} | {:error, :invalid_error}
+  def decode(nil, _max_data_bytes), do: {:ok, nil}
+
+  def decode(%{"code" => code, "message" => message} = error, max_data_bytes)
+      when map_size(error) == 2 do
+    decode_fields(code, message, nil, max_data_bytes)
+  end
+
+  def decode(%{"code" => code, "message" => message, "data" => data} = error, max_data_bytes)
+      when map_size(error) == 3 do
+    decode_fields(code, message, data, max_data_bytes)
+  end
+
+  def decode(_value, _max_data_bytes), do: {:error, :invalid_error}
+
+  defp decode_fields(code, message, data, max_data_bytes) do
+    with true <- is_integer(code),
+         true <- valid_message?(message),
+         {:ok, data} <- safe_data?(data, max_data_bytes) do
+      {:ok, %__MODULE__{code: code, message: message, data: data}}
+    else
+      _invalid -> {:error, :invalid_error}
+    end
+  end
+
+  defp valid_message?(message) when is_binary(message) do
+    String.valid?(message) and byte_size(message) > 0 and byte_size(message) <= 512
+  end
+
+  defp valid_message?(_message), do: false
+
+  defp safe_data?(nil, _max_data_bytes), do: {:ok, nil}
+
+  defp safe_data?(data, max_data_bytes) do
+    with true <- is_map(data) and not is_struct(data),
+         true <- TamaMCP.JSON.value?(data),
+         {:ok, encoded} <- Jason.encode(data),
+         true <- byte_size(encoded) <= max_data_bytes do
+      {:ok, data}
+    else
+      _invalid -> {:error, :invalid_error}
+    end
+  end
+
   @doc false
   @spec reason(t()) :: atom()
   def reason(%__MODULE__{code: code}), do: Map.get(@reasons, code, :unknown)
