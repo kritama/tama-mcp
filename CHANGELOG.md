@@ -13,6 +13,10 @@ The project follows Semantic Versioning and uses Conventional Commits.
   0.11, such as `tama_dex`. jsonschex 0.10.0 is retired. Tool modules embed
   compiled validators, so applications recompile them when upgrading; Mix
   does this automatically.
+- Updated the development lock to `jose` 1.11.13, `mint` 1.11.0 and
+  `plug_crypto` 2.2.1 to clear published security advisories. Dependency
+  requirements are unchanged, so applications pick up these versions through
+  their own lock.
 
 ### Fixed
 
