@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
+## [0.2.1] (2026-11-17)
+
+### Changed
+
+- Upgraded `jsonschex` from `~> 0.10.0` to `~> 0.11.2` (`ex_json_pointer`
+  `0.9`), so `tama_mcp` resolves alongside packages that require jsonschex
+  0.11, such as `tama_dex`. jsonschex 0.10.0 is retired. Tool modules embed
+  compiled validators, so applications recompile them when upgrading; Mix
+  does this automatically.
+
+### Fixed
+
+- Fixed validation error locations for nested array items. Indices are now
+  rendered as decimal segments (`At /rows/300/tags/1: ...`). Previously an
+  index of 128 to 255 put invalid UTF-8 into the `invalid_params` message
+  and an index of 256 or more raised, so the client received an internal
+  error instead of invalid parameters.
+- Tool schemas with a malformed keyword value, such as a non-string `$ref` or
+  array-form `items`, now fail with a `CompileError` that names the problem
+  instead of an internal validator exception.
+
 ## [0.2.0] (2026-09-18)
 
 ### Added
