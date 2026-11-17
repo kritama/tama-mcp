@@ -4,7 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning and uses Conventional Commits.
 
-## Unreleased
+## [0.2.1] (2026-11-17)
+
+### Changed
+
+- Upgraded `jsonschex` from `~> 0.10.0` to `~> 0.11.2` (`ex_json_pointer`
+  `0.9`), so `tama_mcp` resolves alongside packages that require jsonschex
+  0.11, such as `tama_dex`. jsonschex 0.10.0 is retired. Tool modules embed
+  compiled validators, so applications recompile them when upgrading; Mix
+  does this automatically.
+- Updated the development lock to `jose` 1.11.13, `mint` 1.11.0 and
+  `plug_crypto` 2.2.1 to clear published security advisories. Dependency
+  requirements are unchanged, so applications pick up these versions through
+  their own lock.
+
+### Fixed
+
+- Fixed validation error locations for nested array items. Indices are now
+  rendered as decimal segments (`At /rows/300/tags/1: ...`). Previously an
+  index of 128 to 255 put invalid UTF-8 into the `invalid_params` message
+  and an index of 256 or more raised, so the client received an internal
+  error instead of invalid parameters.
+- Tool schemas with a malformed keyword value, such as a non-string `$ref` or
+  array-form `items`, now fail with a `CompileError` that names the problem
+  instead of an internal validator exception.
+
+## [0.2.0] (2026-09-18)
 
 ### Added
 
@@ -44,6 +69,23 @@ The project follows Semantic Versioning and uses Conventional Commits.
   construction cannot drift from the package defaults. Decoding is strict:
   unknown versions, missing or extra fields, invalid bounds, and unsafe result
   metadata fail closed without creating atoms.
+
+## [0.1.2] (2026-09-17)
+
+### Added
+
+- Added object and nullable field composition, nested object declarations, and
+  bounded named output variants to the compile-time Tool schema DSL.
+
+### Fixed
+
+- Fixed a compile failure in tools that declare `annotations:`; the generated
+  annotation map is now escaped before injection into the module.
+- Documented the `TamaMCP.Task.Runner` contract that `start/4` must return the
+  initial `working` snapshot, not a later committed snapshot, and pinned the
+  rejected shape with a transport regression test.
+- Updated the README installation section for the published Hex package and
+  corrected the `TamaMCP.Conformance` moduledoc's `run/3` reference.
 
 ## [0.1.1] (2026-09-17)
 

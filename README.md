@@ -278,7 +278,7 @@ Add the published Hex package to your dependencies:
 ```elixir
 def deps do
   [
-    {:tama_mcp, "~> 0.1.1"}
+    {:tama_mcp, "~> 0.2.1"}
   ]
 end
 ```

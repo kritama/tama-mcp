@@ -15,6 +15,144 @@ defmodule TamaMCP.SchemaTest do
     assert reason =~ "invalid JSON schema"
   end
 
+  test "returns bounded errors for malformed keyword values instead of raising" do
+    assert {:error, "invalid JSON schema: Keyword '$ref' must be a string, got: 5"} =
+             Schema.compile(%{"$ref" => 5})
+
+    assert {:error, "invalid JSON schema: malformed schema keyword value"} =
+             Schema.compile(%{"type" => "array", "items" => [%{"type" => "string"}]})
+  end
+
+  test "fails closed at validation for unresolved and remote references" do
+    for ref <- ["#/$defs/missing", "https://tama.test/schemas/remote.json"] do
+      assert {:ok, compiled} = Schema.compile(%{"$ref" => ref})
+      assert {:error, ["Reference not found: " <> ^ref]} = Schema.validate(compiled, %{})
+    end
+  end
+
+  test "renders array indices in nested error locations as decimal segments" do
+    {:ok, compiled} =
+      Schema.compile(%{
+        "type" => "object",
+        "properties" => %{
+          "rows" => %{
+            "type" => "array",
+            "items" => %{
+              "type" => "object",
+              "properties" => %{"tags" => %{"type" => "array", "items" => %{"type" => "string"}}}
+            }
+          }
+        }
+      })
+
+    for index <- [0, 200, 300] do
+      rows = List.duplicate(%{}, index) ++ [%{"tags" => ["ok", 7]}]
+
+      assert {:error, [detail]} = Schema.validate(compiled, %{"rows" => rows})
+      assert detail == "At /rows/#{index}/tags/1: Expected type string, got integer"
+      assert String.valid?(detail)
+      assert {:ok, _json} = Jason.encode([detail])
+    end
+
+    {:ok, top_level} = Schema.compile(%{"type" => "array", "items" => %{"type" => "string"}})
+
+    assert {:error, ["At /1: Expected type string, got integer"]} =
+             Schema.validate(top_level, ["ok", 1])
+
+    {:ok, named} =
+      Schema.compile(%{
+        "properties" => %{"a" => %{"properties" => %{"b" => %{"type" => "null"}}}}
+      })
+
+    assert {:error, ["At /a/b: Expected type null, got integer"]} =
+             Schema.validate(named, %{"a" => %{"b" => 1}})
+  end
+
+  test "resolves local, recursive, anchored, embedded, and dynamic references" do
+    {:ok, local} =
+      Schema.compile(%{
+        "$schema" => "https://json-schema.org/draft/2020-12/schema",
+        "$defs" => %{
+          "positive" => %{"type" => "integer", "minimum" => 1},
+          "item" => %{
+            "type" => "object",
+            "properties" => %{"count" => %{"$ref" => "#/$defs/positive"}},
+            "required" => ["count"]
+          }
+        },
+        "$ref" => "#/$defs/item"
+      })
+
+    assert :ok = Schema.validate(local, %{"count" => 2})
+    assert {:error, [detail]} = Schema.validate(local, %{"count" => 0})
+    assert detail =~ "/count"
+    assert {:error, [_detail]} = Schema.validate(local, %{})
+
+    {:ok, sibling} =
+      Schema.compile(%{
+        "$defs" => %{"text" => %{"type" => "string"}},
+        "$ref" => "#/$defs/text",
+        "minLength" => 3
+      })
+
+    assert :ok = Schema.validate(sibling, "abc")
+    assert {:error, _details} = Schema.validate(sibling, "ab")
+
+    {:ok, recursive} =
+      Schema.compile(%{
+        "$defs" => %{
+          "node" => %{
+            "type" => "object",
+            "properties" => %{
+              "value" => %{"type" => "integer"},
+              "children" => %{"type" => "array", "items" => %{"$ref" => "#/$defs/node"}}
+            },
+            "additionalProperties" => false
+          }
+        },
+        "$ref" => "#/$defs/node"
+      })
+
+    assert :ok = Schema.validate(recursive, %{"value" => 1, "children" => [%{"value" => 2}]})
+
+    assert {:error, [detail]} =
+             Schema.validate(recursive, %{"children" => [%{"children" => [%{"value" => "x"}]}]})
+
+    assert detail =~ "/children/0/children/0/value"
+
+    {:ok, anchored} =
+      Schema.compile(%{
+        "$defs" => %{"number" => %{"$anchor" => "number", "type" => "number"}},
+        "properties" => %{"value" => %{"$ref" => "#number"}}
+      })
+
+    assert :ok = Schema.validate(anchored, %{"value" => 1.5})
+    assert {:error, _details} = Schema.validate(anchored, %{"value" => "x"})
+
+    {:ok, embedded} =
+      Schema.compile(%{
+        "$id" => "https://tama.test/schemas/root",
+        "$defs" => %{"flag" => %{"$id" => "flag", "type" => "boolean"}},
+        "properties" => %{"enabled" => %{"$ref" => "flag"}}
+      })
+
+    assert :ok = Schema.validate(embedded, %{"enabled" => true})
+    assert {:error, _details} = Schema.validate(embedded, %{"enabled" => 1})
+
+    {:ok, dynamic} =
+      Schema.compile(%{
+        "$id" => "https://tama.test/schemas/tree",
+        "$dynamicAnchor" => "node",
+        "type" => "object",
+        "properties" => %{
+          "children" => %{"type" => "array", "items" => %{"$dynamicRef" => "#node"}}
+        }
+      })
+
+    assert :ok = Schema.validate(dynamic, %{"children" => [%{"children" => []}]})
+    assert {:error, _details} = Schema.validate(dynamic, %{"children" => [1]})
+  end
+
   test "rejects non-JSON terms anywhere in a schema" do
     invalid = [
       %{"type" => "object", "const" => :ok},

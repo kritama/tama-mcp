@@ -31,11 +31,21 @@ defmodule TamaMCP.Schema do
   def compile(schema) when is_map(schema) do
     with :ok <- validate_json(schema),
          :ok <- validate_dialects(schema) do
-      case JSONSchex.compile(schema) do
-        {:ok, compiled} -> {:ok, compiled}
-        {:error, reason} -> {:error, format_compile_error(reason)}
-      end
+      compile_validated(schema)
     end
+  end
+
+  # jsonschex raises instead of returning an error for some malformed keyword
+  # values (for example array-form `items`). Keep the documented
+  # `{:error, reason}` contract and never echo the exception, which can embed
+  # arbitrary schema values.
+  defp compile_validated(schema) do
+    case JSONSchex.compile(schema) do
+      {:ok, compiled} -> {:ok, compiled}
+      {:error, reason} -> {:error, format_compile_error(reason)}
+    end
+  rescue
+    _exception -> {:error, "invalid JSON schema: malformed schema keyword value"}
   end
 
   defp validate_json(schema) do
@@ -59,6 +69,24 @@ defmodule TamaMCP.Schema do
   @spec format_compile_error(term()) :: String.t()
   def format_compile_error(reason) do
     "invalid JSON schema: " <> bounded(JSONSchex.format_error(reason))
+  end
+
+  # Rules whose jsonschex message reads the error path itself.
+  @path_message_rules [:invalid_keyword_value, :invalid_regex, :unsupported_vocabulary]
+
+  # jsonschex renders nested paths as iodata, so an array index becomes a raw
+  # byte (invalid UTF-8 from 128) and raises from 256. Render those instance
+  # locations here and leave every other message to jsonschex unchanged.
+  defp format_validation_error(
+         %JSONSchex.Types.Error{path: [_, _ | _] = path, rule: rule} = error
+       )
+       when rule not in @path_message_rules do
+    if Enum.any?(path, &is_integer/1) do
+      location = path |> Enum.reverse() |> Enum.map_join("/", &to_string/1)
+      bounded("At /#{location}: " <> JSONSchex.format_error(%{error | path: []}))
+    else
+      bounded(JSONSchex.format_error(error))
+    end
   end
 
   defp format_validation_error(error) do
