@@ -28,6 +28,38 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
     def fetch(_key, _loader, _options), do: {:error, %{secret: "must not leak"}}
   end
 
+  defmodule BatchTool do
+    @moduledoc false
+
+    use TamaMCP.Tool, task: :disabled, scopes: ["test.echo"], description: "Accepts rows."
+
+    raw_input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "rows" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{"tags" => %{"type" => "array", "items" => %{"type" => "string"}}}
+          }
+        }
+      },
+      "required" => ["rows"],
+      "additionalProperties" => false
+    })
+
+    @impl true
+    def call(_input, _context), do: {:ok, TamaMCP.Response.success()}
+  end
+
+  defmodule BatchServer do
+    @moduledoc false
+
+    use TamaMCP.Server, name: "tama-mcp-batch-test", version: "0.0.1-test"
+
+    tool(TamaMCP.Transport.StreamableHTTP.PlugTest.BatchTool, name: "batch")
+  end
+
   setup do
     runtime =
       Plug.init(
@@ -386,6 +418,32 @@ defmodule TamaMCP.Transport.StreamableHTTP.PlugTest do
 
       assert conn.status == 400
       assert %{"error" => %{"code" => @invalid_params}} = decode(conn)
+    end
+
+    test "reports invalid arguments at large nested array indices as invalid parameters" do
+      runtime =
+        Plug.init(
+          server: BatchServer,
+          authorization: TamaMCP.TestSupport.Authorization,
+          cache: TamaMCP.TestSupport.Cache
+        )
+
+      for index <- [0, 200, 300] do
+        rows = List.duplicate(%{}, index) ++ [%{"tags" => ["ok", 7]}]
+
+        params = %{"name" => "batch", "arguments" => %{"rows" => rows}}
+
+        conn =
+          post(runtime, Protocol.method(:tools_call), params, headers: [{"mcp-name", "batch"}])
+
+        assert conn.status == 400
+
+        assert %{"error" => %{"code" => @invalid_params, "message" => message}} = decode(conn)
+
+        assert message ==
+                 "Invalid arguments for tool batch: " <>
+                   "At /rows/#{index}/tags/1: Expected type string, got integer"
+      end
     end
 
     test "rejects unsupported continuation fields and non-object arguments", %{runtime: runtime} do
