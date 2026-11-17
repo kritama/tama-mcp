@@ -500,6 +500,50 @@ defmodule TamaMCP.ToolTest do
       end
     end
 
+    test "validates raw schemas that resolve $defs through $ref" do
+      schema = %{
+        "type" => "object",
+        "$defs" => %{
+          "tenant" => %{"type" => "string", "minLength" => 1},
+          "member" => %{
+            "type" => "object",
+            "properties" => %{"tenant" => %{"$ref" => "#/$defs/tenant"}},
+            "required" => ["tenant"],
+            "additionalProperties" => false
+          }
+        },
+        "properties" => %{
+          "members" => %{"type" => "array", "items" => %{"$ref" => "#/$defs/member"}}
+        },
+        "required" => ["members"],
+        "additionalProperties" => false
+      }
+
+      [{mod, _bytecode}] = compile_raw_tool(schema)
+      validator = TamaMCP.Tool.input_validator(mod, Cache)
+
+      assert :ok = TamaMCP.Schema.validate(validator, %{"members" => [%{"tenant" => "acme"}]})
+
+      assert {:error, [detail]} =
+               TamaMCP.Schema.validate(validator, %{"members" => [%{"tenant" => ""}]})
+
+      assert detail =~ "/members/0/tenant"
+
+      assert {:error, _details} =
+               TamaMCP.Schema.validate(validator, %{"members" => [%{"tenant" => "a", "x" => 1}]})
+    end
+
+    test "raises a CompileError for raw schemas with malformed keyword values" do
+      for {schema, message} <- [
+            {%{"type" => "object", "properties" => %{"id" => %{"$ref" => 5}}},
+             ~r/invalid input schema: invalid JSON schema: Keyword '\$ref' must be a string/},
+            {%{"type" => "object", "properties" => %{"ids" => %{"items" => [true]}}},
+             ~r/invalid input schema: invalid JSON schema: malformed schema keyword value/}
+          ] do
+        assert_raise CompileError, message, fn -> compile_raw_tool(schema) end
+      end
+    end
+
     test "rejects raw schemas that explicitly declare unsupported dialects" do
       schema = %{
         "$schema" => "http://json-schema.org/draft-07/schema#",
