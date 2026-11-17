@@ -36,7 +36,7 @@ defmodule TamaMCP.Schema do
   end
 
   # jsonschex raises instead of returning an error for some malformed keyword
-  # values (for example a non-array `required`). Keep the documented
+  # values (for example array-form `items`). Keep the documented
   # `{:error, reason}` contract and never echo the exception, which can embed
   # arbitrary schema values.
   defp compile_validated(schema) do
